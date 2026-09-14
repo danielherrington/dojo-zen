@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 # Load from local project .env if present (prevent scanning parent directories)
-_project_root = Path(__file__).resolve().parent.parent
+_project_root = Path(__file__).resolve().parent.parent.parent
 _env_file = _project_root / ".env"
 if _env_file.exists():
     load_dotenv(dotenv_path=_env_file)

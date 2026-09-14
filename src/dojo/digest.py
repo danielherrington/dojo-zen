@@ -36,7 +36,7 @@ DATE_KEYWORDS = [
 def parse_and_format_timestamp(raw_time: Optional[str]) -> Tuple[str, bool]:
     """
     Parses an ISO timestamp and returns:
-    - Human-readable display string, e.g.:
+    - Human-readable local display string, e.g.:
         "Today at 11:20 AM", "Yesterday at 3:15 PM", "Sep 10 (4d ago)", "Aug 28 (17d ago)"
     - Boolean is_older_than_48h indicating whether the post is older than 48 hours.
     """
@@ -45,22 +45,37 @@ def parse_and_format_timestamp(raw_time: Optional[str]) -> Tuple[str, bool]:
 
     try:
         clean_time = raw_time.replace("Z", "+00:00")
-        dt = datetime.fromisoformat(clean_time)
-        now = datetime.now(timezone.utc)
-        delta = now - dt
+        utc_dt = datetime.fromisoformat(clean_time)
+        # Convert UTC to local timezone
+        local_dt = utc_dt.astimezone()
+        now = datetime.now().astimezone()
+        delta = now - local_dt
 
-        time_str = dt.strftime("%I:%M %p").lstrip("0")
+        # Handle future timestamps or small clock skews
+        if delta.total_seconds() < 0:
+            if abs(delta.total_seconds()) < 300:
+                return ("Just now", False)
+            # Future date or event
+            time_str = local_dt.strftime("%I:%M %p").lstrip("0")
+            if local_dt.date() == now.date():
+                return (f"Today at {time_str}", False)
+            days_ahead = (local_dt.date() - now.date()).days
+            return (f"{local_dt.strftime('%b %d')} (in {days_ahead}d)", False)
 
-        if delta.days == 0:
+        time_str = local_dt.strftime("%I:%M %p").lstrip("0")
+
+        # Check calendar date in local timezone
+        if local_dt.date() == now.date():
             if delta.total_seconds() < 3600:
                 mins = max(1, int(delta.total_seconds() // 60))
-                return (f"{mins}m ago", False)
+                return (f"{mins}m ago ({time_str})", False)
             return (f"Today at {time_str}", False)
-        elif delta.days == 1:
+        elif (now.date() - local_dt.date()).days == 1:
             return (f"Yesterday at {time_str}", False)
         else:
-            date_str = dt.strftime("%b %d")
-            return (f"{date_str} ({delta.days}d ago)", True)
+            days_ago = (now.date() - local_dt.date()).days
+            date_str = local_dt.strftime("%b %d")
+            return (f"{date_str} ({days_ago}d ago)", days_ago >= 2)
     except Exception:
         return (str(raw_time)[:10], False)
 
@@ -98,7 +113,7 @@ class ClassroomHighlight(BaseModel):
 
 
 class Briefing(BaseModel):
-    generated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).strftime("%A, %b %d, %Y"))
+    generated_at: str = Field(default_factory=lambda: datetime.now().astimezone().strftime("%A, %b %d, %Y"))
     children_names: List[str] = Field(default_factory=list)
     action_items: List[ActionItem] = Field(default_factory=list)
     upcoming_dates: List[UpcomingDate] = Field(default_factory=list)
