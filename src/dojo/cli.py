@@ -279,6 +279,13 @@ def cmd_watch(args: argparse.Namespace) -> None:
     monitor.watch(poll_interval=args.interval, to_email=args.to)
 
 
+def cmd_serve(args: argparse.Namespace) -> None:
+    """Launch the Dojo Zen Web Portal & Q&A Assistant."""
+    from dojo.server import run_server
+    settings.ensure_directories()
+    run_server(host=args.host, port=args.port)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="dojo",
@@ -328,6 +335,12 @@ def main() -> None:
     p_watch.add_argument("--interval", type=int, default=300, help="Polling interval in seconds (default: 300s)")
     p_watch.add_argument("--to", help="Override recipient email address")
     p_watch.set_defaults(func=cmd_watch)
+
+    # serve
+    p_serve = subparsers.add_parser("serve", help="Launch the Dojo Zen Web Portal & Q&A Assistant")
+    p_serve.add_argument("--host", default="0.0.0.0", help="Host address to bind (default: 0.0.0.0 for local network access)")
+    p_serve.add_argument("--port", type=int, default=8000, help="Port to listen on (default: 8000)")
+    p_serve.set_defaults(func=cmd_serve)
 
     args = parser.parse_args()
     if not args.command:

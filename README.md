@@ -87,6 +87,7 @@ uv run python -m dojo recap --send-email
 | `dojo run` | One-shot command: Syncs from ClassDojo and emails digest if new items exist |
 | `dojo check-alerts` | One-shot check: Evaluates newly arrived messages and sends immediate priority alerts if urgent |
 | `dojo watch [--interval 300]` | Continuous monitoring daemon polling ClassDojo in real-time |
+| `dojo serve [--port 8000]` | Launch the family web portal & Q&A assistant (accessible on phones/tablets) |
 | `dojo status` | View session health, student counts, and database stats |
 
 ---
@@ -98,7 +99,7 @@ Tracked in Linear Project: [**ClassDojo Anti-Bloat Agent**](https://linear.app/h
 - [x] **[DAN-30]** Direct REST API Client & SQLite Ingestion
 - [x] **[DAN-31]** Anti-Bloat Daily Digest & Email Dispatcher
 - [x] **[DAN-32]** Real-Time Message Monitor & Intelligent Urgency Alerting
-- [ ] **[DAN-33]** Telegram Bot Assistant for ClassDojo
+- [x] **[DAN-33]** Web Portal & Natural Language Q&A Assistant for ClassDojo (Mobile-Friendly)
 - [ ] **[DAN-34]** Model Context Protocol (MCP) Server for ClassDojo
 
 ---

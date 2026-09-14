@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Dojo Zen — Family Classroom Assistant</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎒</text></svg>">
+  <style>
+    :root {
+      --primary: #0284c7;
+      --primary-dark: #0369a1;
+      --accent: #0d9488;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+      --urgent: #dc2626;
+      --urgent-bg: #fee2e2;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    
+    /* Header */
+    header {
+      background: linear-gradient(135deg, #0d9488 0%, #0284c7 100%);
+      color: #ffffff;
+      padding: 16px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .header-title h1 {
+      font-size: 20px;
+      font-weight: 800;
+      margin: 0 0 2px 0;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .header-title p {
+      font-size: 12px;
+      opacity: 0.9;
+      margin: 0;
+    }
+    .sync-btn {
+      background: rgba(255, 255, 255, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      color: white;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    .sync-btn:hover { background: rgba(255, 255, 255, 0.3); }
+    .sync-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .spinning { animation: spin 1s linear infinite; }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      background: #ffffff;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 68px;
+      z-index: 40;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 12px;
+      border: none;
+      background: transparent;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-muted);
+      cursor: pointer;
+      text-align: center;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+    .tab-btn.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+    }
+
+    /* Main Content Container */
+    main {
+      flex: 1;
+      max-width: 760px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+    }
+    .tab-pane { display: none; width: 100%; }
+    .tab-pane.active { display: block; }
+
+    /* Chat Area */
+    #chat-pane {
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 130px);
+    }
+    #chat-history {
+      flex: 1;
+      overflow-y: auto;
+      padding-bottom: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .chat-bubble {
+      max-width: 88%;
+      padding: 14px 16px;
+      border-radius: 16px;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+    .bubble-user {
+      align-self: flex-end;
+      background: var(--primary);
+      color: #ffffff;
+      border-bottom-right-radius: 4px;
+    }
+    .bubble-agent {
+      align-self: flex-start;
+      background: #ffffff;
+      color: var(--text);
+      border: 1px solid var(--border);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.03);
+      border-bottom-left-radius: 4px;
+    }
+    .sources-box {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid #f1f5f9;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .source-item {
+      background: #f8fafc;
+      border-left: 3px solid var(--primary);
+      padding: 6px 10px;
+      border-radius: 4px;
+      margin-top: 6px;
+    }
+    .source-meta {
+      font-weight: 700;
+      color: #334155;
+      margin-bottom: 2px;
+    }
+    .source-snippet {
+      font-style: italic;
+      color: #475569;
+    }
+
+    /* Prompt Chips */
+    .chip-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .chip {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      color: #334155;
+      padding: 8px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .chip:hover {
+      background: #f1f5f9;
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+
+    /* Input Bar */
+    .chat-input-bar {
+      display: flex;
+      gap: 8px;
+      background: #ffffff;
+      border: 1px solid var(--border);
+      padding: 8px;
+      border-radius: 24px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+      position: sticky;
+      bottom: 12px;
+    }
+    .chat-input-bar input {
+      flex: 1;
+      border: none;
+      outline: none;
+      font-size: 15px;
+      padding: 8px 12px;
+      background: transparent;
+    }
+    .send-btn {
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 38px;
+      height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-weight: bold;
+      transition: background 0.2s;
+    }
+    .send-btn:hover { background: var(--primary-dark); }
+
+    /* Briefing & Feed Cards */
+    .card {
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 12px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.02);
+    }
+    .card-urgent {
+      border-left: 4px solid var(--urgent);
+      background: #fffafa;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      margin-right: 6px;
+    }
+    .badge-urgent { background: var(--urgent); color: white; }
+    .badge-past { background: #cbd5e1; color: #475569; }
+    .card-title { font-size: 15px; font-weight: 600; margin: 0 0 4px 0; }
+    .card-meta { font-size: 12px; color: var(--text-muted); }
+    .card-body { font-size: 14px; line-height: 1.5; color: #334155; margin-top: 8px; }
+    .feed-photo { max-width: 100%; border-radius: 8px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="header-title">
+      <h1>🎒 Dojo Zen</h1>
+      <p>Classroom Assistant for Daniel &amp; Family</p>
+    </div>
+    <button class="sync-btn" id="sync-btn" onclick="triggerSync()">
+      <span id="sync-icon">🔄</span> Sync Now
+    </button>
+  </header>
+
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('chat')">💬 Ask Dojo</button>
+    <button class="tab-btn" onclick="switchTab('briefing')">🎒 Today's Briefing</button>
+    <button class="tab-btn" onclick="switchTab('feed')">📰 Class Feed</button>
+  </div>
+
+  <main>
+    <!-- TAB 1: Chat / Q&A -->
+    <div id="chat-pane" class="tab-pane active">
+      <div id="chat-history">
+        <div class="chat-bubble bubble-agent">
+          👋 Hi! I'm your ClassDojo assistant. Ask me anything about what's happening in your child's class, homework, or upcoming dates!
+          <div class="chip-container">
+            <button class="chip" onclick="askChip('What does he need to bring this week?')">🎒 What to bring this week?</button>
+            <button class="chip" onclick="askChip('Is there homework tonight?')">📝 Homework tonight?</button>
+            <button class="chip" onclick="askChip('When is the next test or assessment?')">🧪 Next test or FAST assessment?</button>
+            <button class="chip" onclick="askChip('When is the next day off or early release?')">📅 Next day off or early release?</button>
+            <button class="chip" onclick="askChip('What are this week\'s sight words?')">📖 Sight words practice?</button>
+            <button class="chip" onclick="askChip('Tell me about the 5 senses lab')">🔍 5 Senses celebration?</button>
+          </div>
+        </div>
+      </div>
+
+      <form class="chat-input-bar" onsubmit="submitQuestion(event)">
+        <input type="text" id="query-input" placeholder="Ask anything about class (e.g. what to wear, homework)..." autocomplete="off" />
+        <button type="submit" class="send-btn" id="send-btn">➤</button>
+      </form>
+    </div>
+
+    <!-- TAB 2: Live Briefing -->
+    <div id="briefing-pane" class="tab-pane">
+      <div id="briefing-content">
+        <p style="text-align: center; color: var(--text-muted); padding: 20px;">Loading latest briefing...</p>
+      </div>
+    </div>
+
+    <!-- TAB 3: Classroom Feed -->
+    <div id="feed-pane" class="tab-pane">
+      <div style="margin-bottom: 12px;">
+        <input type="text" id="feed-search" placeholder="Search past announcements..." oninput="filterFeed()" style="width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); font-size: 14px;" />
+      </div>
+      <div id="feed-list">
+        <p style="text-align: center; color: var(--text-muted); padding: 20px;">Loading classroom feed...</p>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    let allFeedItems = [];
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+
+      if (tabId === 'chat') {
+        document.querySelectorAll('.tab-btn')[0].classList.add('active');
+        document.getElementById('chat-pane').classList.add('active');
+      } else if (tabId === 'briefing') {
+        document.querySelectorAll('.tab-btn')[1].classList.add('active');
+        document.getElementById('briefing-pane').classList.add('active');
+        loadBriefing();
+      } else if (tabId === 'feed') {
+        document.querySelectorAll('.tab-btn')[2].classList.add('active');
+        document.getElementById('feed-pane').classList.add('active');
+        loadFeed();
+      }
+    }
+
+    function askChip(text) {
+      document.getElementById('query-input').value = text;
+      submitQuestion(new Event('submit'));
+    }
+
+    async function submitQuestion(e) {
+      if (e) e.preventDefault();
+      const input = document.getElementById('query-input');
+      const query = input.value.trim();
+      if (!query) return;
+
+      const history = document.getElementById('chat-history');
+
+      // Add user bubble
+      const userBubble = document.createElement('div');
+      userBubble.className = 'chat-bubble bubble-user';
+      userBubble.innerText = query;
+      history.appendChild(userBubble);
+      input.value = '';
+
+      // Add loading bubble
+      const loadingBubble = document.createElement('div');
+      loadingBubble.className = 'chat-bubble bubble-agent';
+      loadingBubble.id = 'loading-bubble';
+      loadingBubble.innerHTML = 'Thinking and checking classroom notices...';
+      history.appendChild(loadingBubble);
+      history.scrollTop = history.scrollHeight;
+
+      try {
+        const res = await fetch('/api/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: query })
+        });
+        const data = await res.json();
+        loadingBubble.remove();
+
+        // Render agent response bubble
+        const agentBubble = document.createElement('div');
+        agentBubble.className = 'chat-bubble bubble-agent';
+
+        let html = `<div>${formatMarkdown(data.answer)}</div>`;
+
+        if (data.sources && data.sources.length > 0) {
+          html += `<div class="sources-box"><strong>Sources from ClassDojo:</strong>`;
+          data.sources.forEach(s => {
+            html += `
+              <div class="source-item">
+                <div class="source-meta">${escapeHtml(s.author)} &bull; ${escapeHtml(s.posted_at_str)}</div>
+                <div class="source-snippet">&ldquo;${escapeHtml(s.snippet)}&rdquo;</div>
+              </div>`;
+          });
+          html += `</div>`;
+        }
+
+        if (data.suggested_followups && data.suggested_followups.length > 0) {
+          html += `<div class="chip-container" style="margin-top: 10px;">`;
+          data.suggested_followups.forEach(f => {
+            html += `<button class="chip" onclick="askChip('${escapeHtml(f)}')">${escapeHtml(f)}</button>`;
+          });
+          html += `</div>`;
+        }
+
+        agentBubble.innerHTML = html;
+        history.appendChild(agentBubble);
+      } catch (err) {
+        loadingBubble.innerHTML = `<span style="color: var(--urgent);">Error communicating with server: ${err.message}</span>`;
+      }
+      history.scrollTop = history.scrollHeight;
+    }
+
+    async function loadBriefing() {
+      const container = document.getElementById('briefing-content');
+      try {
+        const res = await fetch('/api/briefing');
+        const data = await res.json();
+        const b = data.briefing;
+
+        let html = '';
+
+        if (b.action_items && b.action_items.length > 0) {
+          html += `<h3 style="color: var(--urgent); margin: 16px 0 8px 0; font-size: 15px;">🚨 ACTION ITEMS &amp; TO-DOS</h3>`;
+          b.action_items.forEach(a => {
+            const urgentBadge = a.urgency === 'high' ? `<span class="badge badge-urgent">URGENT</span>` : '';
+            html += `
+              <div class="card card-urgent">
+                <div class="card-title">${urgentBadge}${escapeHtml(a.summary)}</div>
+                <div class="card-meta">📅 Posted: ${escapeHtml(a.posted_at_str)} &bull; ${escapeHtml(a.author || '')}</div>
+              </div>`;
+          });
+        }
+
+        if (b.upcoming_dates && b.upcoming_dates.length > 0) {
+          html += `<h3 style="color: var(--primary); margin: 20px 0 8px 0; font-size: 15px;">📅 UPCOMING DATES &amp; EVENTS</h3>`;
+          b.upcoming_dates.forEach(d => {
+            html += `
+              <div class="card">
+                <div class="card-title">${escapeHtml(d.title)}</div>
+                <div class="card-meta">📅 Posted: ${escapeHtml(d.posted_at_str || '')} &bull; ${escapeHtml(d.author || '')}</div>
+                ${d.details ? `<div class="card-body">${escapeHtml(d.details)}</div>` : ''}
+              </div>`;
+          });
+        }
+
+        if (b.classroom_highlights && b.classroom_highlights.length > 0) {
+          html += `<h3 style="color: var(--accent); margin: 20px 0 8px 0; font-size: 15px;">🌟 RECENT CLASSROOM HIGHLIGHTS</h3>`;
+          b.classroom_highlights.forEach(h => {
+            html += `
+              <div class="card">
+                <div class="card-title">${escapeHtml(h.author)}</div>
+                <div class="card-meta">📅 Posted: ${escapeHtml(h.posted_at_str)}</div>
+                <div class="card-body">${escapeHtml(h.text)}</div>
+              </div>`;
+          });
+        }
+
+        container.innerHTML = html || '<p style="text-align: center; color: var(--text-muted);">No current action items. All caught up!</p>';
+      } catch (e) {
+        container.innerHTML = `<p style="color: var(--urgent);">Failed to load briefing: ${e.message}</p>`;
+      }
+    }
+
+    async function loadFeed() {
+      const container = document.getElementById('feed-list');
+      try {
+        const res = await fetch('/api/feed');
+        const data = await res.json();
+        allFeedItems = data.items || [];
+        renderFeed(allFeedItems);
+      } catch (e) {
+        container.innerHTML = `<p style="color: var(--urgent);">Failed to load feed: ${e.message}</p>`;
+      }
+    }
+
+    function filterFeed() {
+      const q = document.getElementById('feed-search').value.toLowerCase();
+      const filtered = allFeedItems.filter(item => 
+        (item.author && item.author.toLowerCase().includes(q)) ||
+        (item.text && item.text.toLowerCase().includes(q))
+      );
+      renderFeed(filtered);
+    }
+
+    function renderFeed(items) {
+      const container = document.getElementById('feed-list');
+      if (items.length === 0) {
+        container.innerHTML = `<p style="text-align: center; color: var(--text-muted); padding: 20px;">No posts match your search.</p>`;
+        return;
+      }
+      let html = '';
+      items.forEach(it => {
+        html += `
+          <div class="card">
+            <div class="card-title">${escapeHtml(it.author)}</div>
+            <div class="card-meta">📅 Posted: ${escapeHtml(it.posted_at_str)}</div>
+            <div class="card-body" style="white-space: pre-wrap;">${escapeHtml(it.text)}</div>
+          </div>`;
+      });
+      container.innerHTML = html;
+    }
+
+    async function triggerSync() {
+      const btn = document.getElementById('sync-btn');
+      const icon = document.getElementById('sync-icon');
+      btn.disabled = true;
+      icon.classList.add('spinning');
+
+      try {
+        const res = await fetch('/api/sync', { method: 'POST' });
+        const data = await res.json();
+        alert(`Sync complete! Fetched ${data.new_items} new posts.`);
+        // Reload current tab
+        loadBriefing();
+        loadFeed();
+      } catch (e) {
+        alert('Sync failed: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        icon.classList.remove('spinning');
+      }
+    }
+
+    function formatMarkdown(text) {
+      if (!text) return '';
+      // Bold
+      text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      // Bullets
+      text = text.replace(/^• (.*?)$/gm, '<li style="margin-bottom: 6px;">$1</li>');
+      text = text.replace(/(<li.*<\/li>)/s, '<ul style="padding-left: 20px; margin: 8px 0;">$1</ul>');
+      // Line breaks
+      text = text.replace(/\n\n/g, '<br><br>');
+      return text;
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/[&<>'"]/g, tag => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        "'": '&#39;',
+        '"': '&quot;'
+      }[tag] || tag));
+    }
+  </script>
+</body>
+</html>
