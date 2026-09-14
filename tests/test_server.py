@@ -62,11 +62,12 @@ def test_cron_authorized_query_secret(client, monkeypatch):
     from dojo.config import settings
     monkeypatch.setattr(settings, "cron_secret", "test-secret-123")
 
-    # Mock MessageMonitor to prevent real network calls
+    # Mock MessageMonitor and DojoClient to prevent real network calls
     class MockMonitor:
         def __init__(self, *args, **kwargs): pass
         def check_once(self, *args, **kwargs): return {"checked": 5, "urgent_alerts_sent": 0}
 
+    monkeypatch.setattr("dojo.client.DojoClient.is_authenticated", lambda self: True)
     monkeypatch.setattr("dojo.monitor.MessageMonitor", MockMonitor)
 
     res = client.post("/api/cron/check-alerts?secret=test-secret-123")

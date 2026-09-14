@@ -46,8 +46,8 @@ class DojoClient:
             timeout=30.0,
             follow_redirects=True,
         )
-        if self.session_file and self.session_file.exists():
-            self.load_session()
+        # Load cookies from Firestore (if in cloud) or local session file
+        self.load_session()
 
     def save_session(self) -> None:
         """Persist session cookies to local JSON file and/or Firestore."""

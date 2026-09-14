@@ -127,12 +127,7 @@ async def sync_now():
     """Trigger an on-demand sync from ClassDojo."""
     client = DojoClient(session_file=settings.dojo_session_file)
     if not client.is_authenticated():
-        if settings.dojo_email and settings.dojo_password:
-            success, _ = client.login(settings.dojo_email, settings.dojo_password)
-            if not success:
-                raise HTTPException(status_code=401, detail="Authentication failed with ClassDojo credentials.")
-        else:
-            raise HTTPException(status_code=401, detail="No active session found. Please configure credentials or log in.")
+        raise HTTPException(status_code=401, detail="No active ClassDojo session. Please refresh your session.")
 
     try:
         feed_items = client.get_story_feed(limit=50)
@@ -179,11 +174,9 @@ async def cron_check_alerts(
     try:
         from dojo.monitor import MessageMonitor
         client = DojoClient(session_file=settings.dojo_session_file)
-        if not client.is_authenticated() and settings.dojo_email and settings.dojo_password:
-            try:
-                client.login(settings.dojo_email, settings.dojo_password)
-            except Exception as e:
-                logger.warning(f"ClassDojo login attempt failed: {e}")
+        if not client.is_authenticated():
+            logger.warning("ClassDojo session is not authenticated; skipping API sync to prevent 2FA triggers.")
+            return {"status": "skipped", "reason": "ClassDojo session not authenticated"}
 
         monitor = MessageMonitor(settings=settings, db=db, client=client)
         alerts = monitor.check_once(send_email=True)
@@ -213,14 +206,8 @@ async def cron_daily_digest(
     _verify_cron_secret(authorization, secret)
 
     try:
-        # 1. Sync latest from ClassDojo
+        # 1. Sync latest from ClassDojo if session is valid
         client = DojoClient(session_file=settings.dojo_session_file)
-        if not client.is_authenticated() and settings.dojo_email and settings.dojo_password:
-            try:
-                client.login(settings.dojo_email, settings.dojo_password)
-            except Exception as e:
-                logger.warning(f"ClassDojo login attempt failed: {e}")
-
         if client.is_authenticated():
             try:
                 feed = client.get_story_feed(limit=50)
@@ -230,6 +217,8 @@ async def cron_daily_digest(
                 client.close()
             except Exception as e:
                 logger.warning(f"ClassDojo sync failed: {e}")
+        else:
+            logger.warning("ClassDojo session not authenticated; compiling briefing from cached items.")
 
         # 2. Compile and dispatch daily briefing
         from dojo.mailer import dispatch_daily_briefing
