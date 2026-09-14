@@ -2,7 +2,7 @@
 
 import time
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from rich.console import Console
 
 from dojo.config import Settings
@@ -18,11 +18,20 @@ console = Console()
 class MessageMonitor:
     """Monitors incoming ClassDojo messages and announcements, sending immediate alerts for emergencies."""
 
-    def __init__(self, settings: Settings, db: DojoDatabase):
-        self.settings = settings
-        self.db = db
-        self.evaluator = AlertEvaluator(gemini_api_key=settings.gemini_api_key)
-        self.mailer = Mailer(settings)
+    def __init__(
+        self,
+        settings: Optional[Settings] = None,
+        db: Optional[Any] = None,
+        client: Optional[DojoClient] = None
+    ):
+        from dojo.config import settings as default_settings
+        from dojo.db import get_database
+
+        self.settings = settings or default_settings
+        self.db = db or get_database()
+        self.client = client
+        self.evaluator = AlertEvaluator(gemini_api_key=self.settings.gemini_api_key)
+        self.mailer = Mailer(self.settings)
 
     def check_once(self, send_email: bool = True, to_email: Optional[str] = None) -> List[AlertDecision]:
         """
@@ -32,19 +41,17 @@ class MessageMonitor:
         recipient = to_email or self.settings.email_to
         immediate_alerts: List[AlertDecision] = []
 
-        # 1. Sync from ClassDojo if session exists
-        if self.settings.dojo_session_file.exists():
-            try:
-                client = DojoClient(session_file=self.settings.dojo_session_file)
-                # Fetch recent messages and feed items
+        # 1. Sync from ClassDojo if client or session exists
+        try:
+            client = self.client or DojoClient(session_file=self.settings.dojo_session_file)
+            if client.is_authenticated():
                 messages = client.get_messages()
                 self.db.upsert_messages(messages)
 
                 feed = client.get_story_feed(limit=20)
                 self.db.upsert_feed_items(feed)
-                client.close()
-            except Exception as e:
-                console.print(f"[dim yellow]Warning during monitor sync: {e}[/dim yellow]")
+        except Exception as e:
+            logger.warning(f"Warning during monitor sync: {e}")
 
         # 2. Query items that haven't been evaluated for immediate alerts yet
         unalerted = self.db.get_unalerted_items()

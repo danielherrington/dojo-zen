@@ -39,6 +39,16 @@ class Settings(BaseModel):
     # Optional AI Summarizer
     gemini_api_key: str = Field(default_factory=lambda: os.getenv("GEMINI_API_KEY", ""))
 
+    # Cloud / Firestore
+    use_firestore: bool = Field(
+        default_factory=lambda: os.getenv("USE_FIRESTORE", "").lower() in ("true", "1", "yes")
+        or bool(os.getenv("K_SERVICE"))
+    )
+    google_cloud_project: str = Field(
+        default_factory=lambda: os.getenv("GOOGLE_CLOUD_PROJECT", os.getenv("GCP_PROJECT", "herrington-ai-site"))
+    )
+    cron_secret: str = Field(default_factory=lambda: os.getenv("CRON_SECRET", "dojo-zen-cron-token"))
+
     def ensure_directories(self) -> None:
         """Ensure parent directories for session and database files exist."""
         self.dojo_session_file.parent.mkdir(parents=True, exist_ok=True)

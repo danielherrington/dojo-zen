@@ -1,25 +1,43 @@
 """FastAPI web server for the Dojo Zen Web Portal & Q&A Assistant."""
 
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from dojo.config import settings
-from dojo.db import DojoDatabase
+from dojo.db import get_database
 from dojo.client import DojoClient
 from dojo.digest import DigestEngine, parse_and_format_timestamp
 from dojo.qa import DojoQA, QAResult
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="Dojo Zen Web Portal", description="Classroom Assistant for Daniel & Family")
 
-db = DojoDatabase(settings.dojo_db_path)
+db = get_database()
 qa_engine = DojoQA(db, gemini_api_key=settings.gemini_api_key)
 digest_engine = DigestEngine(gemini_api_key=settings.gemini_api_key)
 
 WEB_DIR = Path(__file__).parent / "web"
+
+
+def _verify_cron_secret(authorization: Optional[str] = None, secret: Optional[str] = None) -> None:
+    """Verify bearer token or query secret matches CRON_SECRET."""
+    token = None
+    if authorization:
+        parts = authorization.split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            token = parts[1]
+    if not token and secret:
+        token = secret
+
+    expected = settings.cron_secret
+    if expected and token != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized: invalid cron secret token.")
 
 
 class AskRequest(BaseModel):
@@ -45,22 +63,13 @@ async def ask_question(req: AskRequest):
 @app.get("/api/briefing")
 async def get_briefing():
     """Fetch the latest live daily briefing without waiting for email."""
-    with db.get_connection() as conn:
-        rows = conn.execute("SELECT * FROM feed_items ORDER BY item_timestamp DESC LIMIT 50").fetchall()
-        feed_items = [dict(r) for r in rows]
-
-        msg_rows = conn.execute("SELECT * FROM messages ORDER BY message_timestamp DESC LIMIT 20").fetchall()
-        messages = [dict(r) for r in msg_rows]
-
-        event_rows = conn.execute("SELECT * FROM events ORDER BY start_time ASC").fetchall()
-        events = [dict(r) for r in event_rows]
-
-        child_rows = conn.execute("SELECT * FROM children").fetchall()
-        children = [dict(r) for r in child_rows]
+    feed_items = db.get_all_feed_items(limit=50)
+    messages = db.get_all_messages(limit=20)
+    events = db.get_all_events()
+    children = db.get_all_children()
 
     briefing = digest_engine.synthesize(feed_items, messages, events, children)
 
-    # Return active items and highlights
     return {
         "briefing": {
             "generated_at": briefing.generated_at,
@@ -77,34 +86,55 @@ async def get_briefing():
 async def get_feed(limit: int = 40):
     """Retrieve classroom feed with formatted local timestamps and authors."""
     items = []
-    with db.get_connection() as conn:
-        rows = conn.execute(
-            "SELECT * FROM feed_items ORDER BY item_timestamp DESC LIMIT ?", (limit,)
-        ).fetchall()
-        for r in rows:
-            text = (r["content_text"] or r["header"] or "").strip()
-            if not text:
-                continue
-            posted_str, _ = parse_and_format_timestamp(r["item_timestamp"])
-            items.append({
-                "id": r["id"],
-                "author": r["author_name"] or "School",
-                "header": r["header"],
-                "text": text,
-                "posted_at_str": posted_str,
-                "raw_time": r["item_timestamp"]
-            })
+    rows = db.get_all_feed_items(limit=limit)
+    for r in rows:
+        text = (r.get("content_text") or r.get("header") or "").strip()
+        if not text:
+            continue
+        posted_str, _ = parse_and_format_timestamp(r.get("item_timestamp"))
+        items.append({
+            "id": r["id"],
+            "author": r.get("author_name") or "School",
+            "header": r.get("header"),
+            "text": text,
+            "posted_at_str": posted_str,
+            "raw_time": r.get("item_timestamp"),
+            "classdojo_url": f"https://home.classdojo.com/#/story/{r['id']}"
+        })
     return {"items": items}
+
+
+@app.get("/api/feed/{item_id}")
+async def get_single_feed_item(item_id: str):
+    """Retrieve a single post by ID for deep linking."""
+    item = db.get_feed_item(item_id) if hasattr(db, "get_feed_item") else None
+    if not item:
+        raise HTTPException(status_code=404, detail="Feed item not found")
+    posted_str, _ = parse_and_format_timestamp(item.get("item_timestamp"))
+    return {
+        "id": item["id"],
+        "author": item.get("author_name") or "School",
+        "header": item.get("header"),
+        "text": (item.get("content_text") or item.get("header") or "").strip(),
+        "posted_at_str": posted_str,
+        "raw_time": item.get("item_timestamp"),
+        "classdojo_url": f"https://home.classdojo.com/#/story/{item['id']}",
+    }
 
 
 @app.post("/api/sync")
 async def sync_now():
     """Trigger an on-demand sync from ClassDojo."""
-    if not settings.dojo_session_file.exists():
-        raise HTTPException(status_code=401, detail="No active session found. Please log in first.")
+    client = DojoClient(session_file=settings.dojo_session_file)
+    if not client.is_authenticated():
+        if settings.dojo_email and settings.dojo_password:
+            success, _ = client.login(settings.dojo_email, settings.dojo_password)
+            if not success:
+                raise HTTPException(status_code=401, detail="Authentication failed with ClassDojo credentials.")
+        else:
+            raise HTTPException(status_code=401, detail="No active session found. Please configure credentials or log in.")
 
     try:
-        client = DojoClient(session_file=settings.dojo_session_file)
         feed_items = client.get_story_feed(limit=50)
         new_feed, upd_feed = db.upsert_feed_items(feed_items)
 
@@ -132,8 +162,82 @@ async def get_status():
     return {
         "status": "online",
         "stats": stats,
-        "database_path": str(settings.dojo_db_path),
+        "database_backend": "firestore" if settings.use_firestore else "sqlite",
     }
+
+
+# --- Scheduled Cloud Cron Webhooks ---
+
+@app.post("/api/cron/check-alerts")
+async def cron_check_alerts(
+    authorization: Optional[str] = Header(None),
+    secret: Optional[str] = Query(None)
+):
+    """Webhook triggered by Cloud Scheduler (e.g. every 10 min) to scan for urgent alerts."""
+    _verify_cron_secret(authorization, secret)
+
+    try:
+        from dojo.monitor import MessageMonitor
+        client = DojoClient(session_file=settings.dojo_session_file)
+        if not client.is_authenticated() and settings.dojo_email and settings.dojo_password:
+            try:
+                client.login(settings.dojo_email, settings.dojo_password)
+            except Exception as e:
+                logger.warning(f"ClassDojo login attempt failed: {e}")
+
+        monitor = MessageMonitor(settings=settings, db=db, client=client)
+        alerts = monitor.check_once(send_email=True)
+        if isinstance(alerts, list):
+            serialized_alerts = [a.model_dump() if hasattr(a, "model_dump") else str(a) for a in alerts]
+            urgent_count = len(alerts)
+        else:
+            serialized_alerts = []
+            urgent_count = 0
+        return {
+            "status": "ok",
+            "urgent_alerts_sent": urgent_count,
+            "alerts": serialized_alerts
+        }
+    except Exception as e:
+        logger.error(f"Cron check-alerts error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/cron/daily-digest")
+async def cron_daily_digest(
+    authorization: Optional[str] = Header(None),
+    secret: Optional[str] = Query(None),
+    force: bool = Query(False)
+):
+    """Webhook triggered by Cloud Scheduler (e.g. 7:00 AM daily) to send morning recap."""
+    _verify_cron_secret(authorization, secret)
+
+    try:
+        # 1. Sync latest from ClassDojo
+        client = DojoClient(session_file=settings.dojo_session_file)
+        if not client.is_authenticated() and settings.dojo_email and settings.dojo_password:
+            try:
+                client.login(settings.dojo_email, settings.dojo_password)
+            except Exception as e:
+                logger.warning(f"ClassDojo login attempt failed: {e}")
+
+        if client.is_authenticated():
+            try:
+                feed = client.get_story_feed(limit=50)
+                db.upsert_feed_items(feed)
+                db.upsert_messages(client.get_messages())
+                db.upsert_events(client.get_events())
+                client.close()
+            except Exception as e:
+                logger.warning(f"ClassDojo sync failed: {e}")
+
+        # 2. Compile and dispatch daily briefing
+        from dojo.mailer import dispatch_daily_briefing
+        result = dispatch_daily_briefing(db=db, force=force)
+        return {"status": "ok", "dispatch": result}
+    except Exception as e:
+        logger.error(f"Cron daily-digest error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def run_server(host: str = "0.0.0.0", port: int = 8000):
@@ -141,5 +245,5 @@ def run_server(host: str = "0.0.0.0", port: int = 8000):
     import uvicorn
     print(f"\n🎒 Dojo Zen Web Portal launching on http://{host}:{port}")
     print(f"👉 Local access: http://localhost:{port}")
-    print(f"👉 Mobile / Family access: http://<your-mac-ip>:{port}\n")
+    print(f"👉 Backend: {'Firestore' if settings.use_firestore else 'SQLite'}\n")
     uvicorn.run("dojo.server:app", host=host, port=port, reload=False)

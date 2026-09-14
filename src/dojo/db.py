@@ -470,3 +470,61 @@ class DojoDatabase:
                 "feed_items": [dict(r) for r in feed_rows],
             }
 
+    def get_all_feed_items(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            if limit:
+                rows = conn.execute(
+                    "SELECT * FROM feed_items ORDER BY item_timestamp DESC LIMIT ?", (limit,)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM feed_items ORDER BY item_timestamp DESC"
+                ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_feed_item(self, item_id: str) -> Optional[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT * FROM feed_items WHERE id = ?", (item_id,)).fetchone()
+            return dict(row) if row else None
+
+    def get_all_messages(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            if limit:
+                rows = conn.execute(
+                    "SELECT * FROM messages ORDER BY message_timestamp DESC LIMIT ?", (limit,)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM messages ORDER BY message_timestamp DESC"
+                ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_all_events(self) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM events ORDER BY start_time ASC"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_all_children(self) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            rows = conn.execute("SELECT * FROM children").fetchall()
+            return [dict(r) for r in rows]
+
+    def save_session(self, cookie_data: Dict[str, str]) -> None:
+        pass
+
+    def load_session(self) -> Optional[Dict[str, str]]:
+        return None
+
+
+def get_database(force_sqlite: bool = False):
+    """Factory to return either FirestoreDojoDatabase or local DojoDatabase."""
+    from dojo.config import settings
+
+    if not force_sqlite and settings.use_firestore:
+        from dojo.firestore_db import FirestoreDojoDatabase
+        return FirestoreDojoDatabase(project=settings.google_cloud_project)
+
+    return DojoDatabase(settings.dojo_db_path)
+

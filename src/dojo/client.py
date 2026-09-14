@@ -50,29 +50,54 @@ class DojoClient:
             self.load_session()
 
     def save_session(self) -> None:
-        """Persist session cookies to local JSON file."""
-        if not self.session_file:
-            return
-        self.session_file.parent.mkdir(parents=True, exist_ok=True)
+        """Persist session cookies to local JSON file and/or Firestore."""
         cookie_data = {}
         for cookie in self.client.cookies.jar:
             cookie_data[cookie.name] = cookie.value
-        self.session_file.write_text(json.dumps(cookie_data, indent=2))
-        logger.debug(f"Saved {len(cookie_data)} cookies to {self.session_file}")
+
+        if self.session_file:
+            self.session_file.parent.mkdir(parents=True, exist_ok=True)
+            self.session_file.write_text(json.dumps(cookie_data, indent=2))
+            logger.debug(f"Saved {len(cookie_data)} cookies to {self.session_file}")
+
+        try:
+            from dojo.config import settings
+            if settings.use_firestore:
+                from dojo.firestore_db import FirestoreDojoDatabase
+                fdb = FirestoreDojoDatabase(project=settings.google_cloud_project)
+                fdb.save_session(cookie_data)
+                logger.debug(f"Saved {len(cookie_data)} cookies to Firestore")
+        except Exception as e:
+            logger.warning(f"Could not persist session to Firestore: {e}")
 
     def load_session(self) -> bool:
-        """Load session cookies from local JSON file."""
-        if not self.session_file or not self.session_file.exists():
-            return False
+        """Load session cookies from Firestore and/or local JSON file."""
+        cookie_dict = None
+
         try:
-            cookie_dict = json.loads(self.session_file.read_text())
+            from dojo.config import settings
+            if settings.use_firestore:
+                from dojo.firestore_db import FirestoreDojoDatabase
+                fdb = FirestoreDojoDatabase(project=settings.google_cloud_project)
+                cookie_dict = fdb.load_session()
+                if cookie_dict:
+                    logger.debug(f"Loaded {len(cookie_dict)} cookies from Firestore")
+        except Exception as e:
+            logger.warning(f"Could not check Firestore for session: {e}")
+
+        if not cookie_dict and self.session_file and self.session_file.exists():
+            try:
+                cookie_dict = json.loads(self.session_file.read_text())
+                logger.debug(f"Loaded {len(cookie_dict)} cookies from {self.session_file}")
+            except Exception as e:
+                logger.warning(f"Could not load session cookies from file: {e}")
+
+        if cookie_dict:
             for name, value in cookie_dict.items():
                 self.client.cookies.set(name, value, domain="home.classdojo.com")
-            logger.debug(f"Loaded {len(cookie_dict)} cookies from {self.session_file}")
             return True
-        except Exception as e:
-            logger.warning(f"Could not load session cookies: {e}")
-            return False
+
+        return False
 
     def is_authenticated(self) -> bool:
         """Check if current cookies provide a valid session."""
@@ -80,8 +105,13 @@ class DojoClient:
             resp = self.client.get(LOGIN_URL)
             if resp.status_code == 200:
                 data = resp.json()
-                # If logged in, session info has an id or user
-                return bool(data.get("id") or data.get("user") or data.get("currentUserId"))
+                return bool(
+                    data.get("id")
+                    or data.get("user")
+                    or data.get("currentUserId")
+                    or data.get("parent")
+                    or data.get("type") == "parent"
+                )
             return False
         except Exception:
             return False

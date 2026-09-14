@@ -139,3 +139,60 @@ class Mailer:
         finally:
             server.quit()
 
+
+def dispatch_daily_briefing(
+    db: Any,
+    settings: Optional[Settings] = None,
+    force: bool = False,
+    to_email: Optional[str] = None,
+    dry_run: bool = False
+) -> dict:
+    """Compile and dispatch daily briefing email, marking items digested and recording audit log."""
+    from dojo.config import settings as default_settings
+    from dojo.digest import DigestEngine
+
+    s = settings or default_settings
+    data = db.get_undigested_items()
+    feed_items = data["feed_items"]
+    messages = data["messages"]
+    events = data["events"]
+
+    total_undigested = len(feed_items) + len(messages) + len(events)
+    if total_undigested == 0 and not force:
+        return {"status": "skipped", "reason": "No new items to recap", "count": 0}
+
+    children = db.get_all_children() if hasattr(db, "get_all_children") else []
+    engine = DigestEngine(gemini_api_key=s.gemini_api_key)
+    briefing = engine.synthesize(
+        feed_items=feed_items,
+        messages=messages,
+        events=events,
+        children=children
+    )
+
+    text_content = engine.format_plain_text(briefing)
+    mailer = Mailer(s)
+
+    if dry_run:
+        html_preview = mailer.render_html(briefing)
+        return {"status": "dry_run", "item_count": total_undigested, "preview_html": html_preview}
+
+    email_sent = mailer.send_digest(briefing, text_content, to_email=to_email)
+    html_content = mailer.render_html(briefing)
+
+    recipient = to_email or s.email_to
+    db.record_digest(
+        content_html=html_content,
+        content_text=text_content,
+        recipient_email=recipient,
+        item_count=total_undigested,
+        sent_status="sent" if email_sent else "failed"
+    )
+
+    feed_ids = [f["id"] for f in feed_items if f.get("id")]
+    message_ids = [m["id"] for m in messages if m.get("id")]
+    event_ids = [e["id"] for e in events if e.get("id")]
+    db.mark_items_digested(feed_ids, message_ids, event_ids)
+
+    return {"status": "sent", "item_count": total_undigested, "recipient": recipient}
+

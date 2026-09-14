@@ -263,6 +263,56 @@
     .card-meta { font-size: 12px; color: var(--text-muted); }
     .card-body { font-size: 14px; line-height: 1.5; color: #334155; margin-top: 8px; }
     .feed-photo { max-width: 100%; border-radius: 8px; margin-top: 8px; }
+
+    .action-btn-sm {
+      background: #f1f5f9;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.15s ease;
+    }
+    .action-btn-sm:hover {
+      background: #e2e8f0;
+      color: var(--text-main);
+    }
+    .highlight-pulse {
+      animation: pulseGlow 2.5s ease-out;
+      border-color: var(--primary) !important;
+      background: #f0fdf4 !important;
+    }
+    @keyframes pulseGlow {
+      0% { transform: scale(1.02); box-shadow: 0 0 0 6px rgba(30, 77, 43, 0.35); }
+      50% { box-shadow: 0 0 0 3px rgba(30, 77, 43, 0.15); }
+      100% { transform: scale(1); box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    }
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1e293b;
+      color: #fff;
+      padding: 10px 18px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 500;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      z-index: 1000;
+      opacity: 0;
+      transition: opacity 0.25s ease;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; }
+    .source-item { cursor: pointer; transition: background 0.15s; }
+    .source-item:hover { background: #f1f5f9; }
   </style>
 </head>
 <body>
@@ -392,8 +442,11 @@
           html += `<div class="sources-box"><strong>Sources from ClassDojo:</strong>`;
           data.sources.forEach(s => {
             html += `
-              <div class="source-item">
-                <div class="source-meta">${escapeHtml(s.author)} &bull; ${escapeHtml(s.posted_at_str)}</div>
+              <div class="source-item" onclick="jumpToItem('${escapeHtml(s.item_id)}')" title="Click to view in Class Feed">
+                <div class="source-meta" style="display: flex; justify-content: space-between;">
+                  <span>${escapeHtml(s.author)} &bull; ${escapeHtml(s.posted_at_str)}</span>
+                  <span style="color: var(--primary); font-weight: 600; font-size: 11px;">View in Feed ↗</span>
+                </div>
                 <div class="source-snippet">&ldquo;${escapeHtml(s.snippet)}&rdquo;</div>
               </div>`;
           });
@@ -497,14 +550,85 @@
       let html = '';
       items.forEach(it => {
         html += `
-          <div class="card">
-            <div class="card-title">${escapeHtml(it.author)}</div>
-            <div class="card-meta">📅 Posted: ${escapeHtml(it.posted_at_str)}</div>
+          <div class="card feed-card" id="item-${it.id}" data-id="${it.id}">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+              <div>
+                <div class="card-title">${escapeHtml(it.author)}</div>
+                <div class="card-meta">📅 Posted: ${escapeHtml(it.posted_at_str)}</div>
+              </div>
+              <div style="display: flex; gap: 6px; flex-shrink: 0;">
+                <button class="action-btn-sm" onclick="copyDeepLink('${it.id}')" title="Copy direct link to this message">🔗 Share</button>
+                <a class="action-btn-sm" href="https://home.classdojo.com/#/story/${it.id}" target="_blank" rel="noopener" title="Open original in ClassDojo">↗ Dojo</a>
+              </div>
+            </div>
             <div class="card-body" style="white-space: pre-wrap;">${escapeHtml(it.text)}</div>
           </div>`;
       });
       container.innerHTML = html;
     }
+
+    function jumpToItem(itemId) {
+      if (!itemId) return;
+      switchTab('feed');
+      history.replaceState(null, null, `?item=${itemId}#item-${itemId}`);
+      setTimeout(() => {
+        const el = document.getElementById(`item-${itemId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.classList.add('highlight-pulse');
+          setTimeout(() => el.classList.remove('highlight-pulse'), 3000);
+        }
+      }, 200);
+    }
+
+    function copyDeepLink(itemId) {
+      const url = `${window.location.origin}/?item=${itemId}#item-${itemId}`;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(() => {
+          showToast('🔗 Deep link copied to clipboard!');
+        }).catch(() => {
+          prompt('Copy this link:', url);
+        });
+      } else {
+        prompt('Copy this link:', url);
+      }
+    }
+
+    function showToast(msg) {
+      let toast = document.getElementById('app-toast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'app-toast';
+        toast.className = 'toast';
+        document.body.appendChild(toast);
+      }
+      toast.innerText = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2500);
+    }
+
+    // Handle deep links and query parameters on page load
+    window.addEventListener('DOMContentLoaded', () => {
+      const params = new URLSearchParams(window.location.search);
+      const targetItem = params.get('item') || (window.location.hash ? window.location.hash.replace('#item-', '').replace('#', '') : null);
+      const askQuery = params.get('ask');
+      const searchQuery = params.get('q');
+      const tab = params.get('tab');
+
+      if (targetItem) {
+        loadFeed().then(() => jumpToItem(targetItem));
+      } else if (askQuery) {
+        switchTab('chat');
+        document.getElementById('query-input').value = askQuery;
+        submitQuestion(new Event('submit'));
+      } else if (searchQuery) {
+        switchTab('feed');
+        document.getElementById('feed-search').value = searchQuery;
+        loadFeed().then(() => filterFeed());
+      } else if (tab) {
+        switchTab(tab);
+      }
+    });
 
     async function triggerSync() {
       const btn = document.getElementById('sync-btn');
@@ -515,7 +639,7 @@
       try {
         const res = await fetch('/api/sync', { method: 'POST' });
         const data = await res.json();
-        alert(`Sync complete! Fetched ${data.new_items} new posts.`);
+        showToast(`✓ Sync complete! ${data.new_items} new posts.`);
         // Reload current tab
         loadBriefing();
         loadFeed();

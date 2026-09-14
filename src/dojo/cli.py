@@ -12,15 +12,16 @@ from rich.table import Table
 from dojo.config import settings
 from dojo.db import DojoDatabase
 from dojo.client import DojoClient, TwoFactorRequiredError
+from dojo.db import DojoDatabase, get_database
 from dojo.digest import DigestEngine
 from dojo.mailer import Mailer
 
 console = Console()
 
 
-def get_db() -> DojoDatabase:
+def get_db():
     settings.ensure_directories()
-    return DojoDatabase(settings.dojo_db_path)
+    return get_database()
 
 
 def cmd_login(args: argparse.Namespace) -> None:
@@ -151,9 +152,7 @@ def cmd_recap(args: argparse.Namespace) -> None:
         return
 
     # Fetch children for header
-    with db.get_connection() as conn:
-        child_rows = conn.execute("SELECT * FROM children").fetchall()
-        children = [dict(r) for r in child_rows]
+    children = db.get_all_children() if hasattr(db, "get_all_children") else []
 
     engine = DigestEngine(gemini_api_key=settings.gemini_api_key)
     briefing = engine.synthesize(
@@ -286,6 +285,48 @@ def cmd_serve(args: argparse.Namespace) -> None:
     run_server(host=args.host, port=args.port)
 
 
+def cmd_seed_firestore(args: argparse.Namespace) -> None:
+    """Migrate local SQLite data and session cookies to Google Cloud Firestore."""
+    from dojo.firestore_db import FirestoreDojoDatabase
+    import json
+
+    sqlite_db = DojoDatabase(settings.dojo_db_path)
+    fdb = FirestoreDojoDatabase(project=settings.google_cloud_project)
+
+    console.print(f"[bold blue]Connecting to Firestore on project '[cyan]{settings.google_cloud_project}[/cyan]'...[/bold blue]")
+
+    with sqlite_db.get_connection() as conn:
+        child_rows = conn.execute("SELECT * FROM children").fetchall()
+        for c in child_rows:
+            fdb.upsert_child(c["id"], c["name"], c["grade"], c["avatar_url"])
+        console.print(f"[green]✓ Migrated {len(child_rows)} children to Firestore.[/green]")
+
+        class_rows = conn.execute("SELECT * FROM classes").fetchall()
+        for cl in class_rows:
+            fdb.upsert_class(cl["id"], cl["name"], cl["teacher_name"], cl["child_id"])
+        console.print(f"[green]✓ Migrated {len(class_rows)} classes to Firestore.[/green]")
+
+        feeds = [dict(r) for r in conn.execute("SELECT * FROM feed_items").fetchall()]
+        new_f, upd_f = fdb.upsert_feed_items(feeds)
+        console.print(f"[green]✓ Migrated {len(feeds)} feed items ({new_f} new, {upd_f} updated) to Firestore.[/green]")
+
+        msgs = [dict(r) for r in conn.execute("SELECT * FROM messages").fetchall()]
+        new_m, upd_m = fdb.upsert_messages(msgs)
+        console.print(f"[green]✓ Migrated {len(msgs)} messages ({new_m} new, {upd_m} updated) to Firestore.[/green]")
+
+        events = [dict(r) for r in conn.execute("SELECT * FROM events").fetchall()]
+        new_e, upd_e = fdb.upsert_events(events)
+        console.print(f"[green]✓ Migrated {len(events)} events ({new_e} new, {upd_e} updated) to Firestore.[/green]")
+
+    if settings.dojo_session_file.exists():
+        cookie_dict = json.loads(settings.dojo_session_file.read_text())
+        fdb.save_session(cookie_dict)
+        console.print(f"[green]✓ Migrated session cookies ({len(cookie_dict)} cookies) to Firestore.[/green]")
+
+    stats = fdb.get_stats()
+    console.print(f"[bold green]✓ Successfully seeded Firestore![/bold green] Total feeds in Firestore: {stats['feed_total']}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="dojo",
@@ -341,6 +382,10 @@ def main() -> None:
     p_serve.add_argument("--host", default="0.0.0.0", help="Host address to bind (default: 0.0.0.0 for local network access)")
     p_serve.add_argument("--port", type=int, default=8000, help="Port to listen on (default: 8000)")
     p_serve.set_defaults(func=cmd_serve)
+
+    # seed-firestore
+    p_seed = subparsers.add_parser("seed-firestore", help="Migrate local SQLite data and session to Cloud Firestore")
+    p_seed.set_defaults(func=cmd_seed_firestore)
 
     args = parser.parse_args()
     if not args.command:

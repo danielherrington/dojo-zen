@@ -9,6 +9,8 @@ dist/
 
 # Dojo Data & Credentials
 .env
+.env.yaml
+*.env.yaml
 data/
 *.db
 *.sqlite
@@ -18,3 +20,4 @@ session.json
 .DS_Store
 .vscode/
 .idea/
+.firebase/

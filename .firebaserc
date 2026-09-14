@@ -1,0 +1,14 @@
+{
+  "projects": {
+    "default": "herrington-ai-site"
+  },
+  "targets": {
+    "herrington-ai-site": {
+      "hosting": {
+        "dojo": [
+          "herrington-dojo"
+        ]
+      }
+    }
+  }
+}

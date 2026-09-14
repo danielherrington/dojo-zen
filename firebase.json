@@ -1,0 +1,17 @@
+{
+  "hosting": [
+    {
+      "target": "dojo",
+      "public": "src/dojo/web",
+      "rewrites": [
+        {
+          "source": "**",
+          "run": {
+            "serviceId": "dojo-zen",
+            "region": "us-central1"
+          }
+        }
+      ]
+    }
+  ]
+}

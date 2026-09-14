@@ -97,47 +97,48 @@ class DojoQA:
         )
 
     def _load_searchable_records(self) -> List[Dict[str, Any]]:
-        """Fetch all feed posts, messages, and events from SQLite."""
+        """Fetch all feed posts, messages, and events from database."""
         records = []
-        with self.db.get_connection() as conn:
-            # Feeds
-            for r in conn.execute("SELECT * FROM feed_items ORDER BY item_timestamp DESC").fetchall():
-                text = (r["content_text"] or r["header"] or "").strip()
-                if not text or is_bloat(text):
-                    continue
-                records.append({
-                    "id": r["id"],
-                    "type": "feed",
-                    "author": r["author_name"] or "School",
-                    "header": r["header"],
-                    "text": text,
-                    "timestamp": r["item_timestamp"],
-                })
+        # Feeds
+        for r in self.db.get_all_feed_items():
+            text = (r.get("content_text") or r.get("header") or "").strip()
+            if not text or is_bloat(text):
+                continue
+            records.append({
+                "id": r["id"],
+                "type": "feed",
+                "author": r.get("author_name") or "School",
+                "header": r.get("header"),
+                "text": text,
+                "timestamp": r.get("item_timestamp"),
+            })
 
-            # Messages
-            for r in conn.execute("SELECT * FROM messages ORDER BY message_timestamp DESC").fetchall():
-                body = (r["body"] or "").strip()
-                if not body or is_bloat(body):
-                    continue
-                records.append({
-                    "id": r["id"],
-                    "type": "message",
-                    "author": r["sender_name"] or "Teacher",
-                    "header": f"Direct message from {r['sender_name']}",
-                    "text": body,
-                    "timestamp": r["message_timestamp"],
-                })
+        # Messages
+        for r in self.db.get_all_messages():
+            body = (r.get("body") or "").strip()
+            if not body or is_bloat(body):
+                continue
+            sender = r.get("sender_name") or "Teacher"
+            records.append({
+                "id": r["id"],
+                "type": "message",
+                "author": sender,
+                "header": f"Direct message from {sender}",
+                "text": body,
+                "timestamp": r.get("message_timestamp"),
+            })
 
-            # Events
-            for r in conn.execute("SELECT * FROM events ORDER BY start_time ASC").fetchall():
-                records.append({
-                    "id": r["id"],
-                    "type": "event",
-                    "author": "School Calendar",
-                    "header": r["title"],
-                    "text": f"{r['title']}: {r['description'] or ''} (Start: {r['start_time'] or 'Upcoming'})",
-                    "timestamp": r["start_time"],
-                })
+        # Events
+        for r in self.db.get_all_events():
+            title = r.get("title") or "School Event"
+            records.append({
+                "id": r["id"],
+                "type": "event",
+                "author": "School Calendar",
+                "header": title,
+                "text": f"{title}: {r.get('description') or ''} (Start: {r.get('start_time') or 'Upcoming'})",
+                "timestamp": r.get("start_time"),
+            })
 
         return records
 
