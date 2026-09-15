@@ -59,11 +59,18 @@ class DojoDatabase:
                     header TEXT,
                     content_text TEXT,
                     attachments_json TEXT,
+                    ocr_json TEXT,
                     item_timestamp TEXT,
                     fetched_at TEXT NOT NULL,
                     digested_at TEXT
                 )
             """)
+
+            # Migration: ensure ocr_json column exists
+            cursor.execute("PRAGMA table_info(feed_items)")
+            cols = [r[1] for r in cursor.fetchall()]
+            if "ocr_json" not in cols:
+                cursor.execute("ALTER TABLE feed_items ADD COLUMN ocr_json TEXT")
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
@@ -370,6 +377,13 @@ class DojoDatabase:
             if event_ids:
                 placeholders = ",".join("?" for _ in event_ids)
                 conn.execute(f"UPDATE events SET digested_at = ? WHERE id IN ({placeholders})", [now, *event_ids])
+            conn.commit()
+
+    def update_item_ocr(self, item_id: str, ocr_data: Any) -> None:
+        """Persist OCR extraction results for a feed item."""
+        val = json.dumps(ocr_data) if not isinstance(ocr_data, str) else ocr_data
+        with self.get_connection() as conn:
+            conn.execute("UPDATE feed_items SET ocr_json = ? WHERE id = ?", (val, item_id))
             conn.commit()
 
     def record_digest(

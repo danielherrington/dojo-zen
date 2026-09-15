@@ -262,7 +262,83 @@
     .card-title { font-size: 15px; font-weight: 600; margin: 0 0 4px 0; }
     .card-meta { font-size: 12px; color: var(--text-muted); }
     .card-body { font-size: 14px; line-height: 1.5; color: #334155; margin-top: 8px; }
-    .feed-photo { max-width: 100%; border-radius: 8px; margin-top: 8px; }
+    .feed-photo { max-width: 100%; border-radius: 8px; margin-top: 8px; border: 1px solid var(--border); display: block; }
+    .feed-photos-grid { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+    .ocr-details {
+      margin-top: 12px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 13px;
+    }
+    .ocr-summary-toggle {
+      font-weight: 600;
+      color: #1e293b;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      list-style: none;
+    }
+    .ocr-summary-toggle::-webkit-details-marker { display: none; }
+    .ocr-summary-toggle::before {
+      content: '▶';
+      font-size: 10px;
+      color: var(--primary);
+      transition: transform 0.2s;
+    }
+    details[open] .ocr-summary-toggle::before { transform: rotate(90deg); }
+    .ocr-body {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #e2e8f0;
+    }
+    .ocr-transcript-box {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 10px;
+      margin-top: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      color: #334155;
+      white-space: pre-wrap;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+    .ocr-meta-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #e0f2fe;
+      color: #0369a1;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-right: 6px;
+      margin-bottom: 6px;
+    }
+    .ocr-action-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #fef3c7;
+      color: #92400e;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-right: 6px;
+      margin-bottom: 6px;
+    }
+    .ocr-scan-cta {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
 
     .action-btn-sm {
       background: #f1f5f9;
@@ -549,6 +625,68 @@
       }
       let html = '';
       items.forEach(it => {
+        let attachmentsHtml = '';
+        const attachments = it.attachments || [];
+        const ocrList = it.ocr_data || [];
+
+        if (attachments.length > 0) {
+          attachmentsHtml += '<div class="feed-photos-grid">';
+          attachments.forEach(att => {
+            const path = att.path || att.url;
+            if (path) {
+              attachmentsHtml += `
+                <a href="${escapeHtml(path)}" target="_blank" rel="noopener" title="Click to view full image in new tab">
+                  <img src="${escapeHtml(path)}" class="feed-photo" loading="lazy" alt="Post Attachment" />
+                </a>`;
+            }
+          });
+          attachmentsHtml += '</div>';
+
+          // OCR details rendering
+          if (ocrList.length > 0) {
+            ocrList.forEach(ocr => {
+              if (ocr.has_text) {
+                let tagsHtml = '';
+                if (ocr.dates && ocr.dates.length > 0) {
+                  ocr.dates.forEach(d => {
+                    tagsHtml += `<span class="ocr-meta-tag">📅 ${escapeHtml(d)}</span>`;
+                  });
+                }
+                if (ocr.action_items && ocr.action_items.length > 0) {
+                  ocr.action_items.forEach(act => {
+                    tagsHtml += `<span class="ocr-action-tag">✅ ${escapeHtml(act)}</span>`;
+                  });
+                }
+
+                attachmentsHtml += `
+                  <details class="ocr-details">
+                    <summary class="ocr-summary-toggle">
+                      <span>📷 <strong>Flyer Extracted:</strong> ${escapeHtml(ocr.summary || 'Click to view transcript')}</span>
+                    </summary>
+                    <div class="ocr-body">
+                      ${tagsHtml ? `<div style="margin-bottom: 8px;">${tagsHtml}</div>` : ''}
+                      <div style="font-weight: 600; font-size: 12px; margin-bottom: 4px; color: #475569;">Text Transcript:</div>
+                      <div class="ocr-transcript-box">${escapeHtml(ocr.full_text || '')}</div>
+                    </div>
+                  </details>`;
+              } else {
+                attachmentsHtml += `
+                  <div class="ocr-details" style="color: var(--text-muted); font-size: 12px; font-style: italic;">
+                    📷 Photo analyzed by Gemini — casual photo (no flyer text/dates).
+                  </div>`;
+              }
+            });
+          } else {
+            // Button to trigger OCR scan on demand
+            attachmentsHtml += `
+              <div class="ocr-scan-cta" id="ocr-cta-${it.id}">
+                <button class="action-btn-sm" onclick="triggerOcrScan('${it.id}')" id="scan-btn-${it.id}" style="background: #e0f2fe; color: #0284c7; border-color: #bae6fd;">
+                  🔍 Extract Flyer / Image Text (Gemini OCR)
+                </button>
+              </div>`;
+          }
+        }
+
         html += `
           <div class="card feed-card" id="item-${it.id}" data-id="${it.id}">
             <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
@@ -561,10 +699,39 @@
                 <a class="action-btn-sm" href="https://home.classdojo.com/#/story/${it.id}" target="_blank" rel="noopener" title="Open original in ClassDojo">↗ Dojo</a>
               </div>
             </div>
-            <div class="card-body" style="white-space: pre-wrap;">${escapeHtml(it.text)}</div>
+            ${it.text ? `<div class="card-body" style="white-space: pre-wrap;">${escapeHtml(it.text)}</div>` : ''}
+            ${attachmentsHtml}
           </div>`;
       });
       container.innerHTML = html;
+    }
+
+    async function triggerOcrScan(itemId) {
+      const btn = document.getElementById(`scan-btn-${itemId}`);
+      if (btn) {
+        btn.disabled = true;
+        btn.innerText = '⏳ Scanning with Gemini OCR...';
+      }
+      try {
+        const res = await fetch(`/api/feed/${itemId}/analyze`, { method: 'POST' });
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        showToast('✓ Image successfully scanned!');
+        // Update local item in allFeedItems
+        const item = allFeedItems.find(x => String(x.id) === String(itemId));
+        if (item) {
+          item.ocr_data = data.ocr_results;
+          renderFeed(allFeedItems);
+        }
+      } catch (err) {
+        showToast(`Scan failed: ${err.message}`);
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = '⚠️ Retry Scan';
+        }
+      }
     }
 
     function jumpToItem(itemId) {

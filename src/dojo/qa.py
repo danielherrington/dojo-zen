@@ -100,8 +100,27 @@ class DojoQA:
         """Fetch all feed posts, messages, and events from database."""
         records = []
         # Feeds
+        import json
         for r in self.db.get_all_feed_items():
             text = (r.get("content_text") or r.get("header") or "").strip()
+
+            # Include OCR text from image attachments
+            ocr_val = r.get("ocr_json") or r.get("ocr_data")
+            if ocr_val:
+                try:
+                    parsed_ocr = json.loads(ocr_val) if isinstance(ocr_val, str) else ocr_val
+                    ocr_parts = []
+                    if isinstance(parsed_ocr, list):
+                        for sub in parsed_ocr:
+                            if isinstance(sub, dict) and sub.get("full_text"):
+                                ocr_parts.append(sub["full_text"])
+                    elif isinstance(parsed_ocr, dict) and parsed_ocr.get("full_text"):
+                        ocr_parts.append(parsed_ocr["full_text"])
+                    if ocr_parts:
+                        text = f"{text}\n[Flyer / Image Transcript: {' | '.join(ocr_parts)}]".strip()
+                except Exception:
+                    pass
+
             if not text or is_bloat(text):
                 continue
             records.append({

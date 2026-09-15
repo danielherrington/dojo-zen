@@ -84,7 +84,7 @@ async def get_briefing():
 
 @app.get("/api/feed")
 async def get_feed(limit: int = 40):
-    """Retrieve classroom feed with formatted local timestamps and authors."""
+    """Retrieve classroom feed with formatted local timestamps, authors, attachments, and OCR transcripts."""
     items = []
     rows = db.get_all_feed_items(limit=limit)
     for r in rows:
@@ -92,6 +92,25 @@ async def get_feed(limit: int = 40):
         if not text:
             continue
         posted_str, _ = parse_and_format_timestamp(r.get("item_timestamp"))
+
+        # Parse attachments
+        attachments = []
+        raw_att = r.get("attachments_json")
+        if raw_att:
+            try:
+                attachments = json.loads(raw_att) if isinstance(raw_att, str) else raw_att
+            except Exception:
+                attachments = []
+
+        # Parse OCR data
+        ocr_data = None
+        raw_ocr = r.get("ocr_json") or r.get("ocr_data")
+        if raw_ocr:
+            try:
+                ocr_data = json.loads(raw_ocr) if isinstance(raw_ocr, str) else raw_ocr
+            except Exception:
+                ocr_data = None
+
         items.append({
             "id": r["id"],
             "author": r.get("author_name") or "School",
@@ -99,7 +118,9 @@ async def get_feed(limit: int = 40):
             "text": text,
             "posted_at_str": posted_str,
             "raw_time": r.get("item_timestamp"),
-            "classdojo_url": f"https://home.classdojo.com/#/story/{r['id']}"
+            "classdojo_url": f"https://home.classdojo.com/#/story/{r['id']}",
+            "attachments": attachments,
+            "ocr_data": ocr_data,
         })
     return {"items": items}
 
@@ -111,6 +132,23 @@ async def get_single_feed_item(item_id: str):
     if not item:
         raise HTTPException(status_code=404, detail="Feed item not found")
     posted_str, _ = parse_and_format_timestamp(item.get("item_timestamp"))
+
+    attachments = []
+    raw_att = item.get("attachments_json")
+    if raw_att:
+        try:
+            attachments = json.loads(raw_att) if isinstance(raw_att, str) else raw_att
+        except Exception:
+            attachments = []
+
+    ocr_data = None
+    raw_ocr = item.get("ocr_json") or item.get("ocr_data")
+    if raw_ocr:
+        try:
+            ocr_data = json.loads(raw_ocr) if isinstance(raw_ocr, str) else raw_ocr
+        except Exception:
+            ocr_data = None
+
     return {
         "id": item["id"],
         "author": item.get("author_name") or "School",
@@ -119,7 +157,26 @@ async def get_single_feed_item(item_id: str):
         "posted_at_str": posted_str,
         "raw_time": item.get("item_timestamp"),
         "classdojo_url": f"https://home.classdojo.com/#/story/{item['id']}",
+        "attachments": attachments,
+        "ocr_data": ocr_data,
     }
+
+
+@app.post("/api/feed/{item_id}/analyze")
+async def analyze_single_feed_item(item_id: str):
+    """Analyze image attachments for a post using Gemini Multimodal OCR."""
+    from dojo.vision import analyze_feed_attachments
+    item = db.get_feed_item(item_id) if hasattr(db, "get_feed_item") else None
+    if not item:
+        raise HTTPException(status_code=404, detail="Feed item not found")
+
+    client = DojoClient(session_file=settings.dojo_session_file)
+    cookies = {c.name: c.value for c in client.client.cookies.jar}
+
+    ocr_results = analyze_feed_attachments(item, cookies=cookies)
+    if ocr_results:
+        db.update_item_ocr(item_id, ocr_results)
+    return {"item_id": item_id, "ocr_results": ocr_results}
 
 
 @app.post("/api/sync")

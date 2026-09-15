@@ -383,6 +383,11 @@ class FirestoreDojoDatabase:
         doc = self.feed_col.document(str(item_id)).get()
         return doc.to_dict() if doc.exists else None
 
+    def update_item_ocr(self, item_id: str, ocr_data: Any) -> None:
+        """Persist OCR extraction results for a feed item in Firestore."""
+        doc_ref = self.feed_col.document(str(item_id))
+        doc_ref.set({"ocr_data": ocr_data}, merge=True)
+
     def get_all_events(self) -> List[Dict[str, Any]]:
         docs = self.event_col.stream()
         items = [d.to_dict() for d in docs]

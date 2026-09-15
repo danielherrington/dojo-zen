@@ -323,8 +323,75 @@ def cmd_seed_firestore(args: argparse.Namespace) -> None:
         fdb.save_session(cookie_dict)
         console.print(f"[green]✓ Migrated session cookies ({len(cookie_dict)} cookies) to Firestore.[/green]")
 
-    stats = fdb.get_stats()
-    console.print(f"[bold green]✓ Successfully seeded Firestore![/bold green] Total feeds in Firestore: {stats['feed_total']}")
+def cmd_analyze_images(args: argparse.Namespace) -> None:
+    """Analyze image attachments in feed posts using Gemini Multimodal OCR."""
+    import json
+    from dojo.vision import analyze_feed_attachments
+
+    db = get_db()
+    client = DojoClient(session_file=settings.dojo_session_file)
+    cookies = {c.name: c.value for c in client.client.cookies.jar} if hasattr(client, "client") and client.client.cookies else {}
+
+    all_items = db.get_all_feed_items()
+    candidates = []
+    for it in all_items:
+        # Check attachments
+        att_raw = it.get("attachments") or it.get("attachments_json")
+        has_att = False
+        if att_raw:
+            try:
+                atts = json.loads(att_raw) if isinstance(att_raw, str) else att_raw
+                if atts and len(atts) > 0:
+                    has_att = True
+            except Exception:
+                has_att = False
+
+        if not has_att:
+            continue
+
+        # Check if already has OCR
+        ocr_raw = it.get("ocr_json") or it.get("ocr_data")
+        if not getattr(args, "all", False) and ocr_raw:
+            try:
+                parsed_ocr = json.loads(ocr_raw) if isinstance(ocr_raw, str) else ocr_raw
+                if parsed_ocr:
+                    continue
+            except Exception:
+                pass
+
+        candidates.append(it)
+
+    limit = args.limit or len(candidates)
+    to_process = candidates[:limit]
+
+    if not to_process:
+        console.print("[green]✓ All posts with image attachments have already been analyzed.[/green]")
+        return
+
+    console.print(f"[bold cyan]Scanning {len(to_process)} feed posts with Gemini Multimodal OCR...[/bold cyan]\n")
+
+    for idx, item in enumerate(to_process, 1):
+        item_id = item["id"]
+        author = item.get("author_name") or "School"
+        header = item.get("header") or item.get("content_text", "")[:40]
+        console.print(f"[dim][{idx}/{len(to_process)}][/dim] [bold]{author}[/bold] - [dim]{header}...[/dim]")
+
+        ocr_results = analyze_feed_attachments(item, cookies=cookies)
+        if ocr_results:
+            db.update_item_ocr(item_id, ocr_results)
+            for res in ocr_results:
+                if res.get("has_text"):
+                    console.print(f"  [green]✓ Found text:[/green] {res.get('summary')}")
+                    if res.get("dates"):
+                        console.print(f"    [cyan]Dates:[/cyan] {', '.join(res['dates'])}")
+                    if res.get("action_items"):
+                        console.print(f"    [yellow]Actions:[/yellow] {', '.join(res['action_items'])}")
+                else:
+                    console.print(f"  [dim]Casual photo (no text)[/dim]")
+        else:
+            console.print("  [dim]No downloadable attachments processed.[/dim]")
+
+    console.print(f"\n[bold green]✓ Completed image analysis for {len(to_process)} posts.[/bold green]")
 
 
 def cmd_mcp(args: argparse.Namespace) -> None:
@@ -398,6 +465,12 @@ def main() -> None:
     p_mcp = subparsers.add_parser("mcp", help="Run Model Context Protocol (MCP) server for AI assistants")
     p_mcp.add_argument("--transport", choices=["stdio", "sse"], default="stdio", help="MCP transport protocol (default: stdio)")
     p_mcp.set_defaults(func=cmd_mcp)
+
+    # analyze-images
+    p_analyze = subparsers.add_parser("analyze-images", help="Scan feed attachments with Gemini Multimodal OCR")
+    p_analyze.add_argument("--limit", type=int, default=10, help="Maximum items to analyze (default: 10)")
+    p_analyze.add_argument("--all", action="store_true", help="Re-analyze items that already have OCR data")
+    p_analyze.set_defaults(func=cmd_analyze_images)
 
     args = parser.parse_args()
     if not args.command:

@@ -284,6 +284,22 @@ class DigestEngine:
                     posted_at_str=posted_str
                 ))
 
+            # Process OCR extracted text, dates, and action items from image attachments
+            ocr_data = item.get("ocr_json") or item.get("ocr_data")
+            if ocr_data:
+                if isinstance(ocr_data, str):
+                    try:
+                        ocr_data = json.loads(ocr_data)
+                    except Exception:
+                        ocr_data = None
+
+                if isinstance(ocr_data, list):
+                    for sub_ocr in ocr_data:
+                        if isinstance(sub_ocr, dict):
+                            self._integrate_ocr_into_briefing(sub_ocr, author, posted_str, is_stale_post, action_items, upcoming_dates)
+                elif isinstance(ocr_data, dict):
+                    self._integrate_ocr_into_briefing(ocr_data, author, posted_str, is_stale_post, action_items, upcoming_dates)
+
         # Deduplicate actions and dates by summary/title
         unique_actions = self._deduplicate_actions(action_items)
         unique_dates = self._deduplicate_dates(upcoming_dates)
@@ -336,6 +352,46 @@ class DigestEngine:
                 seen.add(key)
                 result.append(it)
         return result
+
+    def _integrate_ocr_into_briefing(
+        self,
+        ocr: Dict[str, Any],
+        author: str,
+        posted_str: str,
+        is_stale_post: bool,
+        action_items: List[ActionItem],
+        upcoming_dates: List[UpcomingDate]
+    ) -> None:
+        if not ocr.get("has_text"):
+            return
+
+        # Dates from image
+        for d in ocr.get("dates", []):
+            title = d.get("title") or "School Event"
+            date_info = d.get("date_str") or "Upcoming"
+            if d.get("time"):
+                date_info += f" at {d['time']}"
+            loc = f" ({d['location']})" if d.get("location") else ""
+            upcoming_dates.append(UpcomingDate(
+                title=f"{title}{loc}",
+                date_str=date_info,
+                details=f"From flyer/image posted by {author}",
+                posted_at_str=posted_str,
+                author=author
+            ))
+
+        # Action items from image
+        for act in ocr.get("action_items", []):
+            summary = act.get("summary") if isinstance(act, dict) else str(act)
+            urgency = act.get("urgency", "normal") if isinstance(act, dict) else "normal"
+            action_items.append(ActionItem(
+                summary=f"[Flyer Note] {summary}",
+                context=f"From photo/flyer posted by {author}",
+                author=author,
+                urgency=urgency,
+                posted_at_str=posted_str,
+                is_stale=is_stale_post
+            ))
 
     def format_plain_text(self, briefing: Briefing) -> str:
         """Render the briefing as formatted plain text for terminal or text-only emails."""
