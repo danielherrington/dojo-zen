@@ -174,8 +174,8 @@ class DojoDatabase:
                 attachments = item.get("attachments") or item.get("contents", {}).get("attachments") or []
                 attachments_str = json.dumps(attachments)
 
-                content_text = item.get("content_text") or item.get("contents", {}).get("body") or ""
-                header = item.get("header") or item.get("contents", {}).get("title") or ""
+                content_text = item.get("content_text") or item.get("contents", {}).get("body") or item.get("body") or ""
+                header = item.get("header") or item.get("contents", {}).get("title") or item.get("title") or ""
                 
                 sender_name = item.get("senderName") or item.get("headerText") or item.get("author_name") or item.get("author", {}).get("name") or ""
                 subtext = item.get("headerSubtext") or item.get("targetName") or ""
@@ -509,6 +509,11 @@ class DojoDatabase:
     def get_all_children(self) -> List[Dict[str, Any]]:
         with self.get_connection() as conn:
             rows = conn.execute("SELECT * FROM children").fetchall()
+            return [dict(r) for r in rows]
+
+    def get_all_classes(self) -> List[Dict[str, Any]]:
+        with self.get_connection() as conn:
+            rows = conn.execute("SELECT * FROM classes").fetchall()
             return [dict(r) for r in rows]
 
     def save_session(self, cookie_data: Dict[str, str]) -> None:

@@ -393,6 +393,10 @@ class FirestoreDojoDatabase:
         docs = self.child_col.stream()
         return [d.to_dict() for d in docs]
 
+    def get_all_classes(self) -> List[Dict[str, Any]]:
+        docs = self.class_col.stream()
+        return [d.to_dict() for d in docs]
+
     def get_stats(self) -> Dict[str, Any]:
         feed_items = self.get_all_feed_items()
         messages = self.get_all_messages()

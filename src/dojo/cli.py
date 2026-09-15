@@ -327,6 +327,13 @@ def cmd_seed_firestore(args: argparse.Namespace) -> None:
     console.print(f"[bold green]✓ Successfully seeded Firestore![/bold green] Total feeds in Firestore: {stats['feed_total']}")
 
 
+def cmd_mcp(args: argparse.Namespace) -> None:
+    """Run the Model Context Protocol (MCP) server for ClassDojo."""
+    from dojo.mcp_server import run_mcp
+    transport = getattr(args, "transport", "stdio")
+    run_mcp(transport=transport)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="dojo",
@@ -386,6 +393,11 @@ def main() -> None:
     # seed-firestore
     p_seed = subparsers.add_parser("seed-firestore", help="Migrate local SQLite data and session to Cloud Firestore")
     p_seed.set_defaults(func=cmd_seed_firestore)
+
+    # mcp
+    p_mcp = subparsers.add_parser("mcp", help="Run Model Context Protocol (MCP) server for AI assistants")
+    p_mcp.add_argument("--transport", choices=["stdio", "sse"], default="stdio", help="MCP transport protocol (default: stdio)")
+    p_mcp.set_defaults(func=cmd_mcp)
 
     args = parser.parse_args()
     if not args.command:
