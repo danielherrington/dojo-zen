@@ -158,8 +158,14 @@ def dispatch_daily_briefing(
     events = data["events"]
 
     total_undigested = len(feed_items) + len(messages) + len(events)
-    if total_undigested == 0 and not force:
-        return {"status": "skipped", "reason": "No new items to recap", "count": 0}
+    if total_undigested == 0:
+        if not force:
+            return {"status": "skipped", "reason": "No new items to recap", "count": 0}
+        # When force is requested, compile recent items so the briefing is populated
+        feed_items = db.get_all_feed_items(limit=15) if hasattr(db, "get_all_feed_items") else []
+        messages = db.get_all_messages(limit=10) if hasattr(db, "get_all_messages") else []
+        events = db.get_all_events() if hasattr(db, "get_all_events") else []
+        total_undigested = len(feed_items) + len(messages) + len(events)
 
     children = db.get_all_children() if hasattr(db, "get_all_children") else []
     engine = DigestEngine(gemini_api_key=s.gemini_api_key)
