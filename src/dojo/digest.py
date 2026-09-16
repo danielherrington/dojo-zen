@@ -87,6 +87,7 @@ class ActionItem(BaseModel):
     urgency: str = "normal"  # "high", "normal", "expired"
     posted_at_str: str = "Recently"
     is_stale: bool = False
+    image_urls: List[str] = Field(default_factory=list)
 
 
 class UpcomingDate(BaseModel):
@@ -95,6 +96,7 @@ class UpcomingDate(BaseModel):
     details: Optional[str] = None
     posted_at_str: Optional[str] = None
     author: Optional[str] = None
+    image_urls: List[str] = Field(default_factory=list)
 
 
 class TeacherNote(BaseModel):
@@ -108,6 +110,7 @@ class ClassroomHighlight(BaseModel):
     author: str
     text: str
     attachment_count: int = 0
+    image_urls: List[str] = Field(default_factory=list)
     date_str: Optional[str] = None
     posted_at_str: str = "Recently"
 
@@ -239,15 +242,23 @@ class DigestEngine:
             posted_str, is_stale_post = parse_and_format_timestamp(raw_time)
             lower = content.lower()
 
-            # Attachments count
+            # Attachments & Image URLs
             import json
             attachments = []
             try:
-                raw_att = item.get("attachments_json")
-                if raw_att:
+                raw_att = item.get("attachments") or item.get("attachments_json")
+                if isinstance(raw_att, str):
                     attachments = json.loads(raw_att)
+                elif isinstance(raw_att, list):
+                    attachments = raw_att
             except Exception:
-                pass
+                attachments = []
+
+            image_urls = [
+                att.get("path") or att.get("url")
+                for att in attachments
+                if isinstance(att, dict) and (att.get("path") or att.get("url"))
+            ]
 
             # Check for dates / events in text
             if any(k in lower for k in DATE_KEYWORDS):
@@ -257,7 +268,8 @@ class DigestEngine:
                     date_str=posted_str,
                     details=content[:200],
                     posted_at_str=posted_str,
-                    author=author
+                    author=author,
+                    image_urls=image_urls
                 ))
 
             # Check for action items
@@ -272,7 +284,8 @@ class DigestEngine:
                     author=author,
                     urgency=urgency,
                     posted_at_str=posted_str,
-                    is_stale=is_stale
+                    is_stale=is_stale,
+                    image_urls=image_urls
                 ))
             else:
                 # If not an action item or date, it's a classroom highlight/update
@@ -280,6 +293,7 @@ class DigestEngine:
                     author=author,
                     text=content,
                     attachment_count=len(attachments),
+                    image_urls=image_urls,
                     date_str=raw_time,
                     posted_at_str=posted_str
                 ))
@@ -365,6 +379,8 @@ class DigestEngine:
         if not ocr.get("has_text"):
             return
 
+        img_urls = [ocr["image_url"]] if ocr.get("image_url") else []
+
         # Dates from image
         for d in ocr.get("dates", []):
             title = d.get("title") or "School Event"
@@ -377,7 +393,8 @@ class DigestEngine:
                 date_str=date_info,
                 details=f"From flyer/image posted by {author}",
                 posted_at_str=posted_str,
-                author=author
+                author=author,
+                image_urls=img_urls
             ))
 
         # Action items from image
@@ -390,7 +407,8 @@ class DigestEngine:
                 author=author,
                 urgency=urgency,
                 posted_at_str=posted_str,
-                is_stale=is_stale_post
+                is_stale=is_stale_post,
+                image_urls=img_urls
             ))
 
     def format_plain_text(self, briefing: Briefing) -> str:

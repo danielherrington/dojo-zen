@@ -89,6 +89,7 @@ def test_synthesize_action_items_and_dates():
     # 5. Highlights captured
     assert len(briefing.classroom_highlights) == 1
     assert briefing.classroom_highlights[0].attachment_count == 2
+    assert briefing.classroom_highlights[0].image_urls == ["http://img/1.jpg", "http://img/2.jpg"]
 
     # 6. Plain text formatting
     plain_text = engine.format_plain_text(briefing)
@@ -96,3 +97,11 @@ def test_synthesize_action_items_and_dates():
     assert "ACTION ITEMS & TO-DOS" in plain_text
     assert "shoe box" in plain_text.lower()
     assert "Filtered out 1 marketing/bloat items" in plain_text
+
+    # 7. HTML Email rendering contains images
+    from dojo.config import settings
+    from dojo.mailer import Mailer
+    mailer = Mailer(settings)
+    html = mailer.render_html(briefing)
+    assert '<img src="http://img/1.jpg"' in html
+    assert '<img src="http://img/2.jpg"' in html

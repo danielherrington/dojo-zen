@@ -185,6 +185,15 @@
                   📅 Posted: {{ item.posted_at_str }}
                   {% if item.author %} &bull; {{ item.author }}{% endif %}
                 </div>
+                {% if item.image_urls %}
+                  <div style="margin-top: 10px;">
+                    {% for img in item.image_urls %}
+                      <a href="{{ img }}" target="_blank" style="display: block; margin-top: 8px; text-decoration: none;">
+                        <img src="{{ img }}" alt="Flyer / Attachment" style="max-width: 100%; height: auto; border-radius: 8px; display: block; border: 1px solid #cbd5e1;" />
+                      </a>
+                    {% endfor %}
+                  </div>
+                {% endif %}
               </div>
             {% endfor %}
           </div>
@@ -203,6 +212,15 @@
                 </div>
                 {% if d.details and d.details != d.title %}
                   <p class="item-body">{{ d.details }}</p>
+                {% endif %}
+                {% if d.image_urls %}
+                  <div style="margin-top: 10px;">
+                    {% for img in d.image_urls %}
+                      <a href="{{ img }}" target="_blank" style="display: block; margin-top: 8px; text-decoration: none;">
+                        <img src="{{ img }}" alt="Event Flyer / Attachment" style="max-width: 100%; height: auto; border-radius: 8px; display: block; border: 1px solid #cbd5e1;" />
+                      </a>
+                    {% endfor %}
+                  </div>
                 {% endif %}
               </div>
             {% endfor %}
@@ -237,6 +255,15 @@
                     &bull; 📷 {{ h.attachment_count }} photo{% if h.attachment_count > 1 %}s{% endif %}
                   {% endif %}
                 </div>
+                {% if h.image_urls %}
+                  <div style="margin-top: 10px;">
+                    {% for img in h.image_urls %}
+                      <a href="{{ img }}" target="_blank" style="display: block; margin-top: 8px; text-decoration: none;">
+                        <img src="{{ img }}" alt="Classroom Photo" style="max-width: 100%; height: auto; border-radius: 8px; display: block; border: 1px solid #cbd5e1;" />
+                      </a>
+                    {% endfor %}
+                  </div>
+                {% endif %}
               </div>
             {% endfor %}
           </div>
@@ -256,6 +283,15 @@
                   📅 Posted: {{ item.posted_at_str }}
                   {% if item.author %} &bull; {{ item.author }}{% endif %}
                 </div>
+                {% if item.image_urls %}
+                  <div style="margin-top: 10px;">
+                    {% for img in item.image_urls %}
+                      <a href="{{ img }}" target="_blank" style="display: block; margin-top: 8px; text-decoration: none;">
+                        <img src="{{ img }}" alt="Flyer / Attachment" style="max-width: 100%; height: auto; border-radius: 8px; display: block; border: 1px solid #cbd5e1;" />
+                      </a>
+                    {% endfor %}
+                  </div>
+                {% endif %}
               </div>
             {% endfor %}
           </div>
