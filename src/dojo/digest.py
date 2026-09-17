@@ -117,6 +117,7 @@ class ClassroomHighlight(BaseModel):
 
 class Briefing(BaseModel):
     generated_at: str = Field(default_factory=lambda: datetime.now().astimezone().strftime("%A, %b %d, %Y"))
+    period: str = Field(default_factory=lambda: "Morning" if datetime.now().astimezone().hour < 12 else "Evening")
     children_names: List[str] = Field(default_factory=list)
     action_items: List[ActionItem] = Field(default_factory=list)
     upcoming_dates: List[UpcomingDate] = Field(default_factory=list)

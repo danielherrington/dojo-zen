@@ -151,7 +151,7 @@
 <body>
   <div class="container">
     <div class="header">
-      <h1>🎒 ClassDojo Daily Briefing</h1>
+      <h1>🎒 ClassDojo {{ briefing.period or 'Daily' }} Briefing</h1>
       <p class="subtitle">
         {{ briefing.generated_at }}
         {% if briefing.children_names %}

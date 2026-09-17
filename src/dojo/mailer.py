@@ -63,7 +63,8 @@ class Mailer:
         # Build multipart message
         msg = MIMEMultipart("alternative")
         subject_prefix = "🚨 Action Items: " if briefing.action_items else ""
-        msg["Subject"] = f"{subject_prefix}🎒 ClassDojo Daily Briefing — {briefing.generated_at}"
+        period_str = f" {briefing.period}" if hasattr(briefing, "period") and briefing.period else ""
+        msg["Subject"] = f"{subject_prefix}🎒 ClassDojo{period_str} Briefing — {briefing.generated_at}"
         msg["From"] = self.settings.email_from or self.settings.smtp_user
         msg["To"] = recipient
 
@@ -159,13 +160,13 @@ def dispatch_daily_briefing(
 
     total_undigested = len(feed_items) + len(messages) + len(events)
     if total_undigested == 0:
-        if not force:
-            return {"status": "skipped", "reason": "No new items to recap", "count": 0}
-        # When force is requested, compile recent items so the briefing is populated
+        # If no new items arrived overnight or since last digest, compile recent items so morning/evening briefing always delivers
         feed_items = db.get_all_feed_items(limit=15) if hasattr(db, "get_all_feed_items") else []
         messages = db.get_all_messages(limit=10) if hasattr(db, "get_all_messages") else []
         events = db.get_all_events() if hasattr(db, "get_all_events") else []
         total_undigested = len(feed_items) + len(messages) + len(events)
+        if total_undigested == 0:
+            return {"status": "skipped", "reason": "No items found in database", "count": 0}
 
     children = db.get_all_children() if hasattr(db, "get_all_children") else []
     engine = DigestEngine(gemini_api_key=s.gemini_api_key)
