@@ -243,7 +243,10 @@ class DigestEngine:
             posted_str, is_stale_post = parse_and_format_timestamp(raw_time)
             lower = content.lower()
 
-            # Attachments & Image URLs
+            # Check if this item has already been sent in a previous digest
+            is_already_digested = bool(item.get("digested_at"))
+
+            # Attachments & Image URLs (only include images for new/undigested items)
             import json
             attachments = []
             try:
@@ -255,11 +258,13 @@ class DigestEngine:
             except Exception:
                 attachments = []
 
-            image_urls = [
-                att.get("path") or att.get("url")
-                for att in attachments
-                if isinstance(att, dict) and (att.get("path") or att.get("url"))
-            ]
+            image_urls = []
+            if not is_already_digested:
+                image_urls = [
+                    att.get("path") or att.get("url")
+                    for att in attachments
+                    if isinstance(att, dict) and (att.get("path") or att.get("url"))
+                ]
 
             # Check for dates / events in text
             if any(k in lower for k in DATE_KEYWORDS):
@@ -288,8 +293,8 @@ class DigestEngine:
                     is_stale=is_stale,
                     image_urls=image_urls
                 ))
-            else:
-                # If not an action item or date, it's a classroom highlight/update
+            elif not is_already_digested:
+                # If not an action item or date, it's a classroom highlight/update (skip if already digested)
                 highlights.append(ClassroomHighlight(
                     author=author,
                     text=content,
@@ -308,12 +313,19 @@ class DigestEngine:
                     except Exception:
                         ocr_data = None
 
+                include_ocr_images = not is_already_digested
                 if isinstance(ocr_data, list):
                     for sub_ocr in ocr_data:
                         if isinstance(sub_ocr, dict):
-                            self._integrate_ocr_into_briefing(sub_ocr, author, posted_str, is_stale_post, action_items, upcoming_dates)
+                            self._integrate_ocr_into_briefing(
+                                sub_ocr, author, posted_str, is_stale_post, action_items, upcoming_dates,
+                                include_images=include_ocr_images
+                            )
                 elif isinstance(ocr_data, dict):
-                    self._integrate_ocr_into_briefing(ocr_data, author, posted_str, is_stale_post, action_items, upcoming_dates)
+                    self._integrate_ocr_into_briefing(
+                        ocr_data, author, posted_str, is_stale_post, action_items, upcoming_dates,
+                        include_images=include_ocr_images
+                    )
 
         # Deduplicate actions and dates by summary/title
         unique_actions = self._deduplicate_actions(action_items)
@@ -375,12 +387,13 @@ class DigestEngine:
         posted_str: str,
         is_stale_post: bool,
         action_items: List[ActionItem],
-        upcoming_dates: List[UpcomingDate]
+        upcoming_dates: List[UpcomingDate],
+        include_images: bool = True
     ) -> None:
         if not ocr.get("has_text"):
             return
 
-        img_urls = [ocr["image_url"]] if ocr.get("image_url") else []
+        img_urls = [ocr["image_url"]] if (include_images and ocr.get("image_url")) else []
 
         # Dates from image
         for d in ocr.get("dates", []):

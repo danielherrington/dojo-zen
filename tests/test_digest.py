@@ -105,3 +105,58 @@ def test_synthesize_action_items_and_dates():
     html = mailer.render_html(briefing)
     assert '<img src="http://img/1.jpg"' in html
     assert '<img src="http://img/2.jpg"' in html
+
+
+def test_synthesize_excludes_images_for_already_digested_items():
+    """Verify that items marked as already digested do not re-send photos in future updates."""
+    engine = DigestEngine()
+
+    feed_items = [
+        {
+            "id": "item_fresh_action",
+            "author_name": "Ms. Miller",
+            "content_text": "Please remember to sign the form tomorrow.",
+            "item_timestamp": "2026-09-17T10:00:00Z",
+            "digested_at": None,
+            "attachments_json": '[{"path": "http://img/fresh_form.jpg"}]'
+        },
+        {
+            "id": "item_already_digested_action",
+            "author_name": "Mr. Davis",
+            "content_text": "Reminder: Bring library books on Friday!",
+            "item_timestamp": "2026-09-16T12:00:00Z",
+            "digested_at": "2026-09-16T17:00:00Z",
+            "attachments_json": '[{"path": "http://img/old_library.jpg"}]'
+        },
+        {
+            "id": "item_already_digested_highlight",
+            "author_name": "Ms. Miller",
+            "content_text": "Photos from Doughnuts with Dudes this morning!",
+            "item_timestamp": "2026-09-16T09:00:00Z",
+            "digested_at": "2026-09-16T17:00:00Z",
+            "attachments_json": '[{"path": "http://img/dudes_1.jpg"}, {"path": "http://img/dudes_2.jpg"}]'
+        }
+    ]
+
+    briefing = engine.synthesize(feed_items=feed_items, messages=[], events=[])
+
+    # 1. Action items are retained for context, but old ones have no image_urls
+    actions_by_summary = {a.summary.lower(): a for a in briefing.action_items}
+    # Fresh action item keeps its photo
+    assert any("sign the form" in k and a.image_urls == ["http://img/fresh_form.jpg"] for k, a in actions_by_summary.items())
+    # Already-digested action item retains the action text, but strips the photo
+    assert any("library books" in k and a.image_urls == [] for k, a in actions_by_summary.items())
+
+    # 2. Already-digested photo gallery / highlight is completely omitted
+    assert len(briefing.classroom_highlights) == 0
+
+    # 3. Rendered HTML email only includes the fresh photo, none of the previously sent photos
+    from dojo.config import settings
+    from dojo.mailer import Mailer
+    mailer = Mailer(settings)
+    html = mailer.render_html(briefing)
+    assert "fresh_form.jpg" in html
+    assert "old_library.jpg" not in html
+    assert "dudes_1.jpg" not in html
+    assert "dudes_2.jpg" not in html
+
