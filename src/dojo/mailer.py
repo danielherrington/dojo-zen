@@ -1,5 +1,6 @@
 """Email rendering and SMTP dispatching module."""
 
+import re
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -48,9 +49,14 @@ class Mailer:
         """
         Send multipart (HTML + Text) digest email via configured SMTP.
         """
-        recipient = to_email or self.settings.email_to
-        if not recipient:
+        raw_recipients = to_email or self.settings.email_to
+        if not raw_recipients:
             raise ValueError("No recipient email provided (set EMAIL_TO in .env or pass --to).")
+
+        # Parse multiple comma- or semicolon-separated recipients
+        recipients = [r.strip() for r in re.split(r"[,;]+", raw_recipients) if r.strip()]
+        if not recipients:
+            raise ValueError("No valid recipient email addresses found.")
 
         if not self.settings.smtp_host or not self.settings.smtp_user:
             raise ValueError(
@@ -61,13 +67,14 @@ class Mailer:
         html_content = self.render_html(briefing)
 
         # Build multipart message
+        msg = MIMEMultipart("alternative")
         # Only prefix with [Urgent Action Items] if there are active, high-urgency items (e.g. today/due now)
         has_urgent_actions = any(a.urgency == "high" for a in briefing.active_action_items)
         subject_prefix = "🚨 [Urgent Actions] " if has_urgent_actions else ""
         period_str = f" {briefing.period}" if hasattr(briefing, "period") and briefing.period else ""
         msg["Subject"] = f"{subject_prefix}🎒 DojoZen{period_str} Briefing — {briefing.generated_at}"
         msg["From"] = self.settings.email_from or self.settings.smtp_user
-        msg["To"] = recipient
+        msg["To"] = ", ".join(recipients)
 
         part_text = MIMEText(text_content, "plain", "utf-8")
         part_html = MIMEText(html_content, "html", "utf-8")
@@ -88,16 +95,20 @@ class Mailer:
         try:
             if self.settings.smtp_user and self.settings.smtp_pass:
                 server.login(self.settings.smtp_user, self.settings.smtp_pass)
-            server.sendmail(self.settings.smtp_user, [recipient], msg.as_string())
+            server.sendmail(self.settings.smtp_user, recipients, msg.as_string())
             return True
         finally:
             server.quit()
 
     def send_urgent_alert(self, decision: Any, to_email: Optional[str] = None) -> bool:
         """Send an immediate priority alert email for urgent events."""
-        recipient = to_email or self.settings.email_to
-        if not recipient:
+        raw_recipients = to_email or self.settings.email_to
+        if not raw_recipients:
             raise ValueError("No recipient email provided (set EMAIL_TO in .env or pass --to).")
+
+        recipients = [r.strip() for r in re.split(r"[,;]+", raw_recipients) if r.strip()]
+        if not recipients:
+            raise ValueError("No valid recipient email addresses found.")
 
         if not self.settings.smtp_host or not self.settings.smtp_user:
             raise ValueError(
@@ -119,7 +130,7 @@ class Mailer:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = f"🚨 URGENT DojoZen Alert: {decision.title}"
         msg["From"] = self.settings.email_from or self.settings.smtp_user
-        msg["To"] = recipient
+        msg["To"] = ", ".join(recipients)
         msg["X-Priority"] = "1"  # High priority header
         msg["Importance"] = "High"
 
@@ -136,7 +147,7 @@ class Mailer:
         try:
             if self.settings.smtp_user and self.settings.smtp_pass:
                 server.login(self.settings.smtp_user, self.settings.smtp_pass)
-            server.sendmail(self.settings.smtp_user, [recipient], msg.as_string())
+            server.sendmail(self.settings.smtp_user, recipients, msg.as_string())
             return True
         finally:
             server.quit()

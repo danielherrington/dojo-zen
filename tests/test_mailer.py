@@ -59,3 +59,42 @@ def test_mailer_save_preview():
         assert saved.exists()
         content = saved.read_text(encoding="utf-8")
         assert "All caught up!" in content
+
+
+def test_mailer_multi_recipient(monkeypatch):
+    """Verify that multiple comma-separated emails are correctly parsed and dispatched."""
+    settings = Settings(
+        smtp_host="localhost",
+        smtp_user="test@example.com",
+        smtp_pass="password",
+        email_to="daniel.j.herrington@gmail.com, lucilatijman@gmail.com, mtijman@gmail.com"
+    )
+    mailer = Mailer(settings)
+    briefing = Briefing(generated_at="Monday, Sep 14, 2026")
+
+    sent_recipients = []
+
+    class MockSMTP:
+        def __init__(self, host, port, timeout=30):
+            pass
+        def starttls(self):
+            pass
+        def login(self, user, pwd):
+            pass
+        def sendmail(self, sender, to_addrs, msg_str):
+            sent_recipients.extend(to_addrs)
+            assert "To: daniel.j.herrington@gmail.com, lucilatijman@gmail.com, mtijman@gmail.com" in msg_str
+        def quit(self):
+            pass
+
+    import smtplib
+    monkeypatch.setattr(smtplib, "SMTP", MockSMTP)
+
+    result = mailer.send_digest(briefing, "Test text content")
+    assert result is True
+    assert sent_recipients == [
+        "daniel.j.herrington@gmail.com",
+        "lucilatijman@gmail.com",
+        "mtijman@gmail.com"
+    ]
+
