@@ -18,6 +18,9 @@ def test_normalize_phone_number():
     assert normalize_phone_number("+13015550123") == "+13015550123"
     assert normalize_phone_number("whatsapp:+13015550123") == "+13015550123"
     assert normalize_phone_number("  whatsapp:+15559998888  ") == "+15559998888"
+    assert normalize_phone_number("2409947266") == "+12409947266"
+    assert normalize_phone_number("(240) 994-7266") == "+12409947266"
+    assert normalize_phone_number("whatsapp:240-994-7266") == "+12409947266"
     assert normalize_phone_number("") == ""
 
 
@@ -57,10 +60,12 @@ def test_generate_twiml_response():
     assert "<Message>Math homework is pages 1 &amp; 2.</Message>" in twiml
 
 
-def test_sms_webhook_integration():
+def test_sms_webhook_integration(monkeypatch):
+    from dojo.config import settings
+    monkeypatch.setattr(settings, "family_phone_numbers", "+13015550123,+12409947266")
     client = TestClient(app)
 
-    # 1. Successful query via SMS form data
+    # 1. Successful query via authorized SMS number
     response = client.post(
         "/api/sms/webhook",
         data={
@@ -75,14 +80,26 @@ def test_sms_webhook_integration():
     assert "<Response>" in content
     assert "<Message>" in content
 
-    # 2. Empty query prompt
+    # 2. Empty query prompt from authorized number
     empty_resp = client.post(
         "/api/sms/webhook",
         data={
-            "From": "+13015550123",
+            "From": "+12409947266",
             "Body": "",
             "To": "+18005550199"
         }
     )
     assert empty_resp.status_code == 200
     assert "Ask me anything about school" in empty_resp.text
+
+    # 3. Unauthorized number receives polite rejection
+    unauth_resp = client.post(
+        "/api/sms/webhook",
+        data={
+            "From": "+19998887777",
+            "Body": "What is the homework?",
+            "To": "+18005550199"
+        }
+    )
+    assert unauth_resp.status_code == 200
+    assert "private and only available to authorized family members" in unauth_resp.text

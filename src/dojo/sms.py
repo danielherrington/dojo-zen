@@ -8,13 +8,21 @@ from dojo.qa import DojoQA
 
 
 def normalize_phone_number(raw_number: str) -> str:
-    """Normalize incoming phone numbers by stripping whatsapp: prefix and whitespace."""
+    """Normalize incoming phone numbers by stripping whatsapp: prefix, non-digits, and ensuring standard +E.164 format."""
     if not raw_number:
         return ""
     clean = raw_number.strip()
     if clean.lower().startswith("whatsapp:"):
         clean = clean[9:].strip()
-    return clean
+    # Strip common formatting like spaces, dashes, parentheses
+    digits = re.sub(r"\D", "", clean)
+    if len(digits) == 10:
+        return f"+1{digits}"
+    elif len(digits) == 11 and digits.startswith("1"):
+        return f"+{digits}"
+    elif clean.startswith("+"):
+        return f"+{digits}"
+    return digits
 
 
 def is_authorized_sender(raw_number: str, custom_settings: Optional[Settings] = None) -> bool:
