@@ -430,7 +430,7 @@ class DigestEngine:
         lines = []
         title_date = briefing.generated_at
         lines.append("=" * 60)
-        lines.append(f"🎒 CLASSDOJO DAILY BRIEFING — {title_date}")
+        lines.append(f"🎒 DOJOZEN DAILY BRIEFING — {title_date}")
         if briefing.children_names:
             lines.append(f"Students: {', '.join(briefing.children_names)}")
         lines.append("=" * 60)

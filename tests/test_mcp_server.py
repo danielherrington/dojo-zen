@@ -129,12 +129,12 @@ def test_mcp_tools_execution(mock_populated_db):
 
     # Daily briefing
     briefing = get_daily_briefing(force=True)
-    assert "CLASSDOJO DAILY BRIEFING" in briefing
+    assert "DOJOZEN DAILY BRIEFING" in briefing
 
 
 def test_mcp_resources_and_prompts(mock_populated_db):
     res_briefing = resource_today_briefing()
-    assert "CLASSDOJO DAILY BRIEFING" in res_briefing
+    assert "DOJOZEN DAILY BRIEFING" in res_briefing
 
     res_actions = resource_action_items()
     assert "Active ClassDojo Action Items" in res_actions

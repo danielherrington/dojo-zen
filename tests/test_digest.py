@@ -93,7 +93,7 @@ def test_synthesize_action_items_and_dates():
 
     # 6. Plain text formatting
     plain_text = engine.format_plain_text(briefing)
-    assert "CLASSDOJO DAILY BRIEFING" in plain_text
+    assert "DOJOZEN DAILY BRIEFING" in plain_text
     assert "ACTION ITEMS & TO-DOS" in plain_text
     assert "shoe box" in plain_text.lower()
     assert "Filtered out 1 marketing/bloat items" in plain_text

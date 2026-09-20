@@ -32,7 +32,7 @@ def test_mailer_render_html():
 
     html = mailer.render_html(briefing)
 
-    assert "ClassDojo Daily Briefing" in html
+    assert "DojoZen Daily Briefing" in html
     assert "Leo" in html
     assert "Bring sneakers for gym" in html
     assert "URGENT" in html

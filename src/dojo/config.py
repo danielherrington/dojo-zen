@@ -32,7 +32,7 @@ class Settings(BaseModel):
         default_factory=lambda: os.getenv("SMTP_USE_TLS", "true").lower() in ("true", "1", "yes")
     )
     email_from: str = Field(
-        default_factory=lambda: os.getenv("EMAIL_FROM", "ClassDojo Digest <dojo@example.com>")
+        default_factory=lambda: os.getenv("EMAIL_FROM", "DojoZen Daily Briefing <dojo@example.com>")
     )
     email_to: str = Field(default_factory=lambda: os.getenv("EMAIL_TO", ""))
 

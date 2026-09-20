@@ -64,7 +64,7 @@ class Mailer:
         msg = MIMEMultipart("alternative")
         subject_prefix = "🚨 Action Items: " if briefing.action_items else ""
         period_str = f" {briefing.period}" if hasattr(briefing, "period") and briefing.period else ""
-        msg["Subject"] = f"{subject_prefix}🎒 ClassDojo{period_str} Briefing — {briefing.generated_at}"
+        msg["Subject"] = f"{subject_prefix}🎒 DojoZen{period_str} Briefing — {briefing.generated_at}"
         msg["From"] = self.settings.email_from or self.settings.smtp_user
         msg["To"] = recipient
 
@@ -106,7 +106,7 @@ class Mailer:
 
         html_content = self.render_alert_html(decision)
         plain_text = (
-            f"🚨 URGENT CLASSDOJO ALERT\n"
+            f"🚨 URGENT DOJOZEN ALERT\n"
             f"=========================================\n"
             f"From: {decision.sender_or_author}\n"
             f"Reason: {decision.reason}\n"
@@ -116,7 +116,7 @@ class Mailer:
             plain_text += f"Action Required: {decision.action_required}\n"
 
         msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"🚨 URGENT ClassDojo Alert: {decision.title}"
+        msg["Subject"] = f"🚨 URGENT DojoZen Alert: {decision.title}"
         msg["From"] = self.settings.email_from or self.settings.smtp_user
         msg["To"] = recipient
         msg["X-Priority"] = "1"  # High priority header

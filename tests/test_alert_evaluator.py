@@ -90,7 +90,7 @@ def test_alert_mailer_rendering():
     decision = evaluator.evaluate_message(msg)
     html = mailer.render_alert_html(decision)
 
-    assert "Urgent ClassDojo Alert" in html
+    assert "Urgent DojoZen Alert" in html
     assert "Nurse Sarah" in html
     assert "fever" in html
     assert "Check on your child" in html
