@@ -47,6 +47,13 @@ class Settings(BaseModel):
     google_cloud_project: str = Field(
         default_factory=lambda: os.getenv("GOOGLE_CLOUD_PROJECT", os.getenv("GCP_PROJECT", "herrington-ai-site"))
     )
+    # Twilio / SMS & WhatsApp Assistant
+    twilio_account_sid: str = Field(default_factory=lambda: os.getenv("TWILIO_ACCOUNT_SID", ""))
+    twilio_auth_token: str = Field(default_factory=lambda: os.getenv("TWILIO_AUTH_TOKEN", ""))
+    family_phone_numbers: str = Field(
+        default_factory=lambda: os.getenv("FAMILY_PHONE_NUMBERS", "")
+    )  # Comma-separated E.164 phone numbers (e.g. "+13015550123,+13015550124")
+
     cron_secret: str = Field(default_factory=lambda: os.getenv("CRON_SECRET", "dojo-zen-cron-token"))
 
     def ensure_directories(self) -> None:

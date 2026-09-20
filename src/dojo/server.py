@@ -3,7 +3,7 @@
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Form, Header, HTTPException, Query, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -216,6 +216,29 @@ async def get_status():
         "stats": stats,
         "database_backend": "firestore" if settings.use_firestore else "sqlite",
     }
+
+
+# --- Twilio SMS / WhatsApp / RCS Inbound Webhook ---
+
+@app.post("/api/sms/webhook")
+async def twilio_sms_webhook(
+    From: str = Form(""),
+    Body: str = Form(""),
+    To: str = Form(""),
+    AccountSid: Optional[str] = Form(None),
+    MessageSid: Optional[str] = Form(None),
+):
+    """Inbound webhook called by Twilio when an SMS, WhatsApp, or RCS text is received."""
+    from dojo.sms import handle_incoming_sms
+
+    logger.info(f"Incoming text from {From} (To: {To}): {Body[:60]}")
+    twiml = handle_incoming_sms(
+        from_number=From,
+        query_text=Body,
+        qa_engine=qa_engine,
+        custom_settings=settings
+    )
+    return Response(content=twiml, media_type="application/xml")
 
 
 # --- Scheduled Cloud Cron Webhooks ---
