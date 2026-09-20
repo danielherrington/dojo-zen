@@ -98,3 +98,54 @@ def test_mailer_multi_recipient(monkeypatch):
         "mtijman@gmail.com"
     ]
 
+
+def test_mailer_digest_and_alert_links():
+    settings = Settings(app_base_url="https://dojo-zen-test.run.app")
+    mailer = Mailer(settings)
+
+    briefing = Briefing(
+        generated_at="Monday, Sep 14, 2026",
+        action_items=[
+            ActionItem(summary="Field trip permission slip", context="Permission needed", item_id="item123", image_urls=["https://img.com/slip.jpg"])
+        ],
+        upcoming_dates=[
+            UpcomingDate(title="Science Fair", date_str="Oct 12", item_id="item456")
+        ],
+        teacher_notes=[
+            TeacherNote(sender="Teacher A", body="Hello class", item_id="item789")
+        ],
+        classroom_highlights=[
+            ClassroomHighlight(author="Art Teacher", text="Art project", item_id="item999")
+        ]
+    )
+
+    html = mailer.render_html(briefing)
+
+    # Must link to DojoZen, never ClassDojo
+    assert "home.classdojo.com" not in html
+    assert "https://dojo-zen-test.run.app" in html
+    assert "https://dojo-zen-test.run.app/?item=item123#item-item123" in html
+    assert "https://dojo-zen-test.run.app/?item=item456#item-item456" in html
+    assert "https://dojo-zen-test.run.app/?item=item789#item-item789" in html
+    assert "https://dojo-zen-test.run.app/?item=item999#item-item999" in html
+    assert "Open DojoZen" in html
+
+    # Alert rendering test
+    from dojo.alert_evaluator import AlertDecision, UrgencyLevel
+    alert = AlertDecision(
+        item_id="alert123",
+        item_type="message",
+        sender_or_author="School Nurse",
+        title="Leo in nurse office",
+        body="Leo has a slight fever.",
+        urgency=UrgencyLevel.IMMEDIATE,
+        reason="Medical attention",
+        action_required="Please pick up Leo"
+    )
+
+    alert_html = mailer.render_alert_html(alert)
+    assert "home.classdojo.com" not in alert_html
+    assert "https://dojo-zen-test.run.app/?item=alert123#item-alert123" in alert_html
+    assert "View Notice in DojoZen ↗" in alert_html
+
+

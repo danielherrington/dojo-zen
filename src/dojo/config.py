@@ -54,6 +54,11 @@ class Settings(BaseModel):
         default_factory=lambda: os.getenv("FAMILY_PHONE_NUMBERS", "")
     )  # Comma-separated E.164 phone numbers (e.g. "+13015550123,+13015550124")
 
+    # Web Portal URL for Email Links
+    app_base_url: str = Field(
+        default_factory=lambda: os.getenv("APP_BASE_URL", "https://dojo-zen-647998166555.us-central1.run.app")
+    )
+
     cron_secret: str = Field(default_factory=lambda: os.getenv("CRON_SECRET", "dojo-zen-cron-token"))
 
     def ensure_directories(self) -> None:

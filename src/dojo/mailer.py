@@ -27,11 +27,17 @@ class Mailer:
 
     def render_html(self, briefing: Briefing) -> str:
         """Render the Jinja2 HTML email template."""
-        return self.template.render(briefing=briefing)
+        return self.template.render(
+            briefing=briefing,
+            app_base_url=self.settings.app_base_url.rstrip("/")
+        )
 
     def render_alert_html(self, decision: Any) -> str:
         """Render the Jinja2 HTML alert template."""
-        return self.alert_template.render(decision=decision)
+        return self.alert_template.render(
+            decision=decision,
+            app_base_url=self.settings.app_base_url.rstrip("/")
+        )
 
     def save_preview(self, html_content: str, output_path: Optional[Path] = None) -> Path:
         """Save rendered HTML digest to a local file for browser inspection."""

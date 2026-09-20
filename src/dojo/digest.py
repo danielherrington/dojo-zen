@@ -88,6 +88,7 @@ class ActionItem(BaseModel):
     posted_at_str: str = "Recently"
     is_stale: bool = False
     image_urls: List[str] = Field(default_factory=list)
+    item_id: Optional[str] = None
 
 
 class UpcomingDate(BaseModel):
@@ -97,6 +98,7 @@ class UpcomingDate(BaseModel):
     posted_at_str: Optional[str] = None
     author: Optional[str] = None
     image_urls: List[str] = Field(default_factory=list)
+    item_id: Optional[str] = None
 
 
 class TeacherNote(BaseModel):
@@ -104,6 +106,7 @@ class TeacherNote(BaseModel):
     body: str
     timestamp: Optional[str] = None
     posted_at_str: str = "Recently"
+    item_id: Optional[str] = None
 
 
 class ClassroomHighlight(BaseModel):
@@ -113,6 +116,7 @@ class ClassroomHighlight(BaseModel):
     image_urls: List[str] = Field(default_factory=list)
     date_str: Optional[str] = None
     posted_at_str: str = "Recently"
+    item_id: Optional[str] = None
 
 
 class Briefing(BaseModel):
@@ -190,7 +194,8 @@ class DigestEngine:
                 title=title,
                 date_str=start,
                 details=desc or None,
-                posted_at_str=posted_time
+                posted_at_str=posted_time,
+                item_id=ev.get("id")
             ))
 
         # 2. Process Direct Teacher Messages
@@ -208,7 +213,8 @@ class DigestEngine:
                 sender=sender,
                 body=body,
                 timestamp=msg_time_val,
-                posted_at_str=posted_str
+                posted_at_str=posted_str,
+                item_id=msg.get("id")
             ))
 
             # Scan message body for action items
@@ -225,7 +231,8 @@ class DigestEngine:
                     author=sender,
                     urgency=urgency,
                     posted_at_str=posted_str,
-                    is_stale=is_stale
+                    is_stale=is_stale,
+                    item_id=msg.get("id")
                 ))
 
         # 3. Process Story Feed items
@@ -238,6 +245,7 @@ class DigestEngine:
                 bloat_count += 1
                 continue
 
+            item_id = item.get("id")
             # Resolve author name and class
             author = item.get("author_name") or item.get("senderName") or "Teacher / School"
             raw_time = item.get("item_timestamp")
@@ -276,7 +284,8 @@ class DigestEngine:
                     details=content[:200],
                     posted_at_str=posted_str,
                     author=author,
-                    image_urls=image_urls
+                    image_urls=image_urls,
+                    item_id=item_id
                 ))
 
             # Check for action items
@@ -293,7 +302,8 @@ class DigestEngine:
                     urgency=urgency,
                     posted_at_str=posted_str,
                     is_stale=is_stale,
-                    image_urls=image_urls
+                    image_urls=image_urls,
+                    item_id=item_id
                 ))
             elif not is_already_digested:
                 # If not an action item or date, it's a classroom highlight/update (skip if already digested)
@@ -303,7 +313,8 @@ class DigestEngine:
                     attachment_count=len(attachments),
                     image_urls=image_urls,
                     date_str=raw_time,
-                    posted_at_str=posted_str
+                    posted_at_str=posted_str,
+                    item_id=item_id
                 ))
 
             # Process OCR extracted text, dates, and action items from image attachments
@@ -321,12 +332,12 @@ class DigestEngine:
                         if isinstance(sub_ocr, dict):
                             self._integrate_ocr_into_briefing(
                                 sub_ocr, author, posted_str, is_stale_post, action_items, upcoming_dates,
-                                include_images=include_ocr_images
+                                include_images=include_ocr_images, item_id=item_id
                             )
                 elif isinstance(ocr_data, dict):
                     self._integrate_ocr_into_briefing(
                         ocr_data, author, posted_str, is_stale_post, action_items, upcoming_dates,
-                        include_images=include_ocr_images
+                        include_images=include_ocr_images, item_id=item_id
                     )
 
         # Deduplicate actions and dates by summary/title
@@ -390,7 +401,8 @@ class DigestEngine:
         is_stale_post: bool,
         action_items: List[ActionItem],
         upcoming_dates: List[UpcomingDate],
-        include_images: bool = True
+        include_images: bool = True,
+        item_id: Optional[str] = None
     ) -> None:
         if not ocr.get("has_text"):
             return
@@ -410,7 +422,8 @@ class DigestEngine:
                 details=f"From flyer/image posted by {author}",
                 posted_at_str=posted_str,
                 author=author,
-                image_urls=img_urls
+                image_urls=img_urls,
+                item_id=item_id
             ))
 
         # Action items from image
@@ -424,7 +437,8 @@ class DigestEngine:
                 urgency=urgency,
                 posted_at_str=posted_str,
                 is_stale=is_stale_post,
-                image_urls=img_urls
+                image_urls=img_urls,
+                item_id=item_id
             ))
 
     def format_plain_text(self, briefing: Briefing) -> str:

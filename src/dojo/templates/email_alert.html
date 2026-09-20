@@ -129,9 +129,18 @@
           <div class="action-text">{{ decision.action_required }}</div>
         </div>
       {% endif %}
+
+      <div style="text-align: center; margin-top: 24px; margin-bottom: 8px;">
+        <a href="{{ app_base_url }}{% if decision.item_id %}/?item={{ decision.item_id }}#item-{{ decision.item_id }}{% endif %}" target="_blank" style="display: inline-block; background: #dc2626; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 700; font-size: 14px;">
+          View Notice in DojoZen ↗
+        </a>
+      </div>
     </div>
 
     <div class="footer">
+      <div style="margin-bottom: 10px;">
+        <a href="{{ app_base_url }}" target="_blank" style="color: #64748b; text-decoration: underline; font-weight: 600;">Open DojoZen Portal</a>
+      </div>
       Sent immediately by DojoZen Alert Monitor.<br>
       Routine updates and photos are held for your daily morning recap.
     </div>

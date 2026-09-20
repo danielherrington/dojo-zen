@@ -151,13 +151,24 @@
 <body>
   <div class="container">
     <div class="header">
-      <h1>🎒 DojoZen {{ briefing.period or 'Daily' }} Briefing</h1>
-      <p class="subtitle">
-        {{ briefing.generated_at }}
-        {% if briefing.children_names %}
-          &bull; {{ briefing.children_names | join(', ') }}
-        {% endif %}
-      </p>
+      <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
+        <tr>
+          <td valign="middle">
+            <h1>🎒 DojoZen {{ briefing.period or 'Daily' }} Briefing</h1>
+            <p class="subtitle">
+              {{ briefing.generated_at }}
+              {% if briefing.children_names %}
+                &bull; {{ briefing.children_names | join(', ') }}
+              {% endif %}
+            </p>
+          </td>
+          <td align="right" valign="middle" style="white-space: nowrap;">
+            <a href="{{ app_base_url }}" target="_blank" style="display: inline-block; background: rgba(255, 255, 255, 0.2); border: 1px solid rgba(255, 255, 255, 0.4); color: #ffffff; text-decoration: none; padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 600;">
+              Open DojoZen ↗
+            </a>
+          </td>
+        </tr>
+      </table>
     </div>
 
     <div class="content">
@@ -184,11 +195,14 @@
                 <div class="item-meta">
                   📅 Posted: {{ item.posted_at_str }}
                   {% if item.author %} &bull; {{ item.author }}{% endif %}
+                  {% if item.item_id %}
+                    &bull; <a href="{{ app_base_url }}/?item={{ item.item_id }}#item-{{ item.item_id }}" target="_blank" style="color: #dc2626; text-decoration: none; font-weight: 600;">View in DojoZen ↗</a>
+                  {% endif %}
                 </div>
                 {% if item.image_urls %}
                   <div style="margin-top: 10px;">
                     {% for img in item.image_urls %}
-                      <a href="{{ img }}" target="_blank" style="display: block; margin-top: 8px; text-decoration: none;">
+                      <a href="{% if item.item_id %}{{ app_base_url }}/?item={{ item.item_id }}#item-{{ item.item_id }}{% else %}{{ img }}{% endif %}" target="_blank" style="display: block; margin-top: 8px; text-decoration: none;">
                         <img src="{{ img }}" alt="Flyer / Attachment" style="max-width: 100%; height: auto; border-radius: 8px; display: block; border: 1px solid #cbd5e1;" />
                       </a>
                     {% endfor %}
@@ -209,6 +223,9 @@
                 <div class="item-meta">
                   📅 Posted: {{ d.posted_at_str }}
                   {% if d.author %} &bull; {{ d.author }}{% endif %}
+                  {% if d.item_id %}
+                    &bull; <a href="{{ app_base_url }}/?item={{ d.item_id }}#item-{{ d.item_id }}" target="_blank" style="color: #2563eb; text-decoration: none; font-weight: 600;">View in DojoZen ↗</a>
+                  {% endif %}
                 </div>
                 {% if d.details and d.details != d.title %}
                   <p class="item-body">{{ d.details }}</p>
@@ -216,7 +233,7 @@
                 {% if d.image_urls %}
                   <div style="margin-top: 10px;">
                     {% for img in d.image_urls %}
-                      <a href="{{ img }}" target="_blank" style="display: block; margin-top: 8px; text-decoration: none;">
+                      <a href="{% if d.item_id %}{{ app_base_url }}/?item={{ d.item_id }}#item-{{ d.item_id }}{% else %}{{ img }}{% endif %}" target="_blank" style="display: block; margin-top: 8px; text-decoration: none;">
                         <img src="{{ img }}" alt="Event Flyer / Attachment" style="max-width: 100%; height: auto; border-radius: 8px; display: block; border: 1px solid #cbd5e1;" />
                       </a>
                     {% endfor %}
@@ -234,7 +251,12 @@
             {% for msg in briefing.teacher_notes %}
               <div class="card card-msg">
                 <div class="item-title">From: {{ msg.sender }}</div>
-                <div class="item-meta">📅 Sent: {{ msg.posted_at_str }}</div>
+                <div class="item-meta">
+                  📅 Sent: {{ msg.posted_at_str }}
+                  {% if msg.item_id %}
+                    &bull; <a href="{{ app_base_url }}/?item={{ msg.item_id }}#item-{{ msg.item_id }}" target="_blank" style="color: #059669; text-decoration: none; font-weight: 600;">View in DojoZen ↗</a>
+                  {% endif %}
+                </div>
                 <p class="item-body">&ldquo;{{ msg.body }}&rdquo;</p>
               </div>
             {% endfor %}
@@ -254,11 +276,14 @@
                   {% if h.attachment_count > 0 %}
                     &bull; 📷 {{ h.attachment_count }} photo{% if h.attachment_count > 1 %}s{% endif %}
                   {% endif %}
+                  {% if h.item_id %}
+                    &bull; <a href="{{ app_base_url }}/?item={{ h.item_id }}#item-{{ h.item_id }}" target="_blank" style="color: #7c3aed; text-decoration: none; font-weight: 600;">View in DojoZen ↗</a>
+                  {% endif %}
                 </div>
                 {% if h.image_urls %}
                   <div style="margin-top: 10px;">
                     {% for img in h.image_urls %}
-                      <a href="{{ img }}" target="_blank" style="display: block; margin-top: 8px; text-decoration: none;">
+                      <a href="{% if h.item_id %}{{ app_base_url }}/?item={{ h.item_id }}#item-{{ h.item_id }}{% else %}{{ img }}{% endif %}" target="_blank" style="display: block; margin-top: 8px; text-decoration: none;">
                         <img src="{{ img }}" alt="Classroom Photo" style="max-width: 100%; height: auto; border-radius: 8px; display: block; border: 1px solid #cbd5e1;" />
                       </a>
                     {% endfor %}
@@ -282,11 +307,14 @@
                 <div class="item-meta">
                   📅 Posted: {{ item.posted_at_str }}
                   {% if item.author %} &bull; {{ item.author }}{% endif %}
+                  {% if item.item_id %}
+                    &bull; <a href="{{ app_base_url }}/?item={{ item.item_id }}#item-{{ item.item_id }}" target="_blank" style="color: #64748b; text-decoration: none; font-weight: 600;">View in DojoZen ↗</a>
+                  {% endif %}
                 </div>
                 {% if item.image_urls %}
                   <div style="margin-top: 10px;">
                     {% for img in item.image_urls %}
-                      <a href="{{ img }}" target="_blank" style="display: block; margin-top: 8px; text-decoration: none;">
+                      <a href="{% if item.item_id %}{{ app_base_url }}/?item={{ item.item_id }}#item-{{ item.item_id }}{% else %}{{ img }}{% endif %}" target="_blank" style="display: block; margin-top: 8px; text-decoration: none;">
                         <img src="{{ img }}" alt="Flyer / Attachment" style="max-width: 100%; height: auto; border-radius: 8px; display: block; border: 1px solid #cbd5e1;" />
                       </a>
                     {% endfor %}
@@ -301,8 +329,15 @@
     </div>
 
     <div class="footer">
-      Generated automatically by Dojo Anti-Bloat Agent.<br>
-      Filtered out {{ briefing.filtered_bloat_count }} promotional items. Total processed: {{ briefing.raw_item_count }}
+      <div style="margin-bottom: 14px;">
+        <a href="{{ app_base_url }}" target="_blank" style="display: inline-block; background: #0284c7; color: #ffffff; text-decoration: none; padding: 10px 22px; border-radius: 6px; font-weight: 600; font-size: 14px;">
+          Open DojoZen Web Portal ↗
+        </a>
+      </div>
+      <div>
+        Generated automatically by Dojo Anti-Bloat Agent.<br>
+        Filtered out {{ briefing.filtered_bloat_count }} promotional items. Total processed: {{ briefing.raw_item_count }}
+      </div>
     </div>
   </div>
 </body>
