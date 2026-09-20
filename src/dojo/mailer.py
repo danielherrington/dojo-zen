@@ -61,8 +61,9 @@ class Mailer:
         html_content = self.render_html(briefing)
 
         # Build multipart message
-        msg = MIMEMultipart("alternative")
-        subject_prefix = "🚨 Action Items: " if briefing.action_items else ""
+        # Only prefix with [Urgent Action Items] if there are active, high-urgency items (e.g. today/due now)
+        has_urgent_actions = any(a.urgency == "high" for a in briefing.active_action_items)
+        subject_prefix = "🚨 [Urgent Actions] " if has_urgent_actions else ""
         period_str = f" {briefing.period}" if hasattr(briefing, "period") and briefing.period else ""
         msg["Subject"] = f"{subject_prefix}🎒 DojoZen{period_str} Briefing — {briefing.generated_at}"
         msg["From"] = self.settings.email_from or self.settings.smtp_user

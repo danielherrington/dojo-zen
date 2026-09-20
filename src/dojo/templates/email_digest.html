@@ -172,7 +172,7 @@
         {# 1. Current / Active Action Items #}
         {% if briefing.active_action_items %}
           <div class="section">
-            <div class="section-title title-action">🚨 Action Items &amp; To-Dos</div>
+            <div class="section-title title-action">📋 Action Items &amp; To-Dos</div>
             {% for item in briefing.active_action_items %}
               <div class="card {% if item.urgency == 'high' %}card-urgent{% else %}card-action{% endif %}">
                 <div class="item-title">

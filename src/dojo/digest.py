@@ -214,9 +214,10 @@ class DigestEngine:
             # Scan message body for action items
             lower_body = body.lower()
             if any(k in lower_body for k in ACTION_KEYWORDS):
-                is_transient = any(w in lower_body for w in ["tomorrow", "tonight", "today"])
-                is_stale = is_stale_msg and is_transient
-                urgency = "expired" if is_stale else ("high" if is_transient else "normal")
+                is_same_day = any(w in lower_body for w in ["today", "tonight", "this evening", "asap", "immediately"])
+                is_tomorrow = "tomorrow" in lower_body
+                is_stale = is_stale_msg and (is_same_day or is_tomorrow)
+                urgency = "expired" if is_stale else ("high" if (is_same_day and not is_stale) else "normal")
 
                 action_items.append(ActionItem(
                     summary=self._extract_action_sentence(body),
@@ -280,9 +281,10 @@ class DigestEngine:
 
             # Check for action items
             if any(k in lower for k in ACTION_KEYWORDS):
-                is_transient = any(w in lower for w in ["tomorrow", "tonight", "today", "this evening"])
-                is_stale = is_stale_post and is_transient
-                urgency = "expired" if is_stale else ("high" if (is_transient or "due" in lower) else "normal")
+                is_same_day = any(w in lower for w in ["today", "tonight", "this evening", "asap", "immediately"])
+                is_tomorrow = "tomorrow" in lower
+                is_stale = is_stale_post and (is_same_day or is_tomorrow)
+                urgency = "expired" if is_stale else ("high" if (is_same_day and not is_stale) else "normal")
 
                 action_items.append(ActionItem(
                     summary=self._extract_action_sentence(content),
