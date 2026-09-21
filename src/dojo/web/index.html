@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
   <title>Dojo Zen — Family Classroom Assistant</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎒</text></svg>">
   <style>
@@ -28,20 +28,25 @@
       display: flex;
       flex-direction: column;
       min-height: 100vh;
+      min-height: 100dvh;
     }
     
-    /* Header */
+    /* Sticky Top Navigation (Header + Tabs together to prevent offset glitches) */
+    .sticky-nav-container {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: #ffffff;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+    }
     header {
       background: linear-gradient(135deg, #0d9488 0%, #0284c7 100%);
       color: #ffffff;
-      padding: 16px 20px;
+      padding: 12px 20px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      position: sticky;
-      top: 0;
-      z-index: 50;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      gap: 12px;
     }
     .header-title h1 {
       font-size: 20px;
@@ -54,40 +59,50 @@
     }
     .header-title p {
       font-size: 12px;
-      opacity: 0.9;
+      opacity: 0.92;
       margin: 0;
     }
     .sync-btn {
       background: rgba(255, 255, 255, 0.2);
-      border: 1px solid rgba(255, 255, 255, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.45);
       color: white;
-      padding: 8px 12px;
+      min-height: 38px;
+      padding: 8px 14px;
       border-radius: 8px;
-      font-size: 12px;
+      font-size: 12.5px;
       font-weight: 600;
       cursor: pointer;
       display: flex;
       align-items: center;
       gap: 6px;
-      transition: all 0.2s;
+      transition: background 0.2s, transform 0.1s;
+      touch-action: manipulation;
+      flex-shrink: 0;
     }
     .sync-btn:hover { background: rgba(255, 255, 255, 0.3); }
+    .sync-btn:active { transform: scale(0.97); }
     .sync-btn:disabled { opacity: 0.6; cursor: not-allowed; }
     .spinning { animation: spin 1s linear infinite; }
     @keyframes spin { 100% { transform: rotate(360deg); } }
+
+    @media (max-width: 480px) {
+      header { padding: 10px 14px; }
+      .header-title h1 { font-size: 18px; }
+      .header-title p { font-size: 11px; }
+      .sync-label { display: none; }
+      .sync-btn { padding: 8px 10px; }
+    }
 
     /* Tabs */
     .tabs {
       display: flex;
       background: #ffffff;
       border-bottom: 1px solid var(--border);
-      position: sticky;
-      top: 68px;
-      z-index: 40;
     }
     .tab-btn {
       flex: 1;
-      padding: 12px;
+      min-height: 46px;
+      padding: 12px 8px;
       border: none;
       background: transparent;
       font-size: 14px;
@@ -95,23 +110,28 @@
       color: var(--text-muted);
       cursor: pointer;
       text-align: center;
-      border-bottom: 2px solid transparent;
+      border-bottom: 3px solid transparent;
       transition: all 0.2s;
+      touch-action: manipulation;
     }
     .tab-btn.active {
       color: var(--primary);
       border-bottom-color: var(--primary);
+      background: #f8fafc;
     }
 
     /* Main Content Container */
     main {
       flex: 1;
-      max-width: 760px;
+      max-width: 900px;
       width: 100%;
       margin: 0 auto;
       padding: 16px;
       display: flex;
       flex-direction: column;
+    }
+    @media (max-width: 640px) {
+      main { padding: 12px; }
     }
     .tab-pane { display: none; width: 100%; }
     .tab-pane.active { display: block; }
@@ -120,15 +140,18 @@
     #chat-pane {
       display: flex;
       flex-direction: column;
-      height: calc(100vh - 130px);
+      height: calc(100vh - 145px);
+      height: calc(100dvh - 145px);
+      min-height: 420px;
     }
     #chat-history {
       flex: 1;
       overflow-y: auto;
-      padding-bottom: 20px;
+      padding-bottom: 16px;
       display: flex;
       flex-direction: column;
       gap: 16px;
+      scroll-behavior: smooth;
     }
     .chat-bubble {
       max-width: 88%;
@@ -136,6 +159,10 @@
       border-radius: 16px;
       font-size: 15px;
       line-height: 1.5;
+      word-break: break-word;
+    }
+    @media (max-width: 480px) {
+      .chat-bubble { max-width: 94%; }
     }
     .bubble-user {
       align-self: flex-end;
@@ -161,18 +188,47 @@
     .source-item {
       background: #f8fafc;
       border-left: 3px solid var(--primary);
-      padding: 6px 10px;
-      border-radius: 4px;
+      padding: 8px 12px;
+      border-radius: 6px;
       margin-top: 6px;
+      cursor: pointer;
+      transition: background 0.15s;
     }
+    .source-item:hover { background: #f1f5f9; }
     .source-meta {
       font-weight: 700;
       color: #334155;
-      margin-bottom: 2px;
+      margin-bottom: 3px;
     }
     .source-snippet {
       font-style: italic;
       color: #475569;
+    }
+
+    /* Typing Animation */
+    .typing-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-muted);
+      font-size: 13.5px;
+    }
+    .typing-dots {
+      display: inline-flex;
+      gap: 4px;
+    }
+    .typing-dots span {
+      width: 6px;
+      height: 6px;
+      background: var(--primary);
+      border-radius: 50%;
+      animation: bounceDot 1.2s infinite ease-in-out both;
+    }
+    .typing-dots span:nth-child(1) { animation-delay: -0.32s; }
+    .typing-dots span:nth-child(2) { animation-delay: -0.16s; }
+    @keyframes bounceDot {
+      0%, 80%, 100% { transform: scale(0); opacity: 0.4; }
+      40% { transform: scale(1); opacity: 1; }
     }
 
     /* Prompt Chips */
@@ -186,18 +242,23 @@
       background: #ffffff;
       border: 1px solid #cbd5e1;
       color: #334155;
-      padding: 8px 12px;
+      min-height: 38px;
+      padding: 8px 14px;
       border-radius: 20px;
       font-size: 13px;
       font-weight: 500;
       cursor: pointer;
+      display: inline-flex;
+      align-items: center;
       transition: all 0.2s;
+      touch-action: manipulation;
     }
     .chip:hover {
       background: #f1f5f9;
       border-color: var(--primary);
       color: var(--primary);
     }
+    .chip:active { transform: scale(0.97); }
 
     /* Input Bar */
     .chat-input-bar {
@@ -205,37 +266,42 @@
       gap: 8px;
       background: #ffffff;
       border: 1px solid var(--border);
-      padding: 8px;
-      border-radius: 24px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+      padding: 6px 8px 6px 14px;
+      border-radius: 28px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.06);
       position: sticky;
-      bottom: 12px;
+      bottom: 8px;
+      margin-bottom: env(safe-area-inset-bottom, 8px);
     }
     .chat-input-bar input {
       flex: 1;
       border: none;
       outline: none;
       font-size: 15px;
-      padding: 8px 12px;
+      padding: 8px 4px;
       background: transparent;
+      color: var(--text);
     }
     .send-btn {
       background: var(--primary);
       color: white;
       border: none;
       border-radius: 50%;
-      width: 38px;
-      height: 38px;
+      width: 44px;
+      height: 44px;
+      min-width: 44px;
       display: flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      font-weight: bold;
-      transition: background 0.2s;
+      font-size: 17px;
+      transition: background 0.2s, transform 0.1s;
+      touch-action: manipulation;
     }
     .send-btn:hover { background: var(--primary-dark); }
+    .send-btn:active { transform: scale(0.95); }
 
-    /* Briefing & Feed Cards */
+    /* Cards & Badges */
     .card {
       background: #ffffff;
       border: 1px solid var(--border);
@@ -252,7 +318,7 @@
       display: inline-block;
       font-size: 11px;
       font-weight: 700;
-      padding: 2px 6px;
+      padding: 3px 7px;
       border-radius: 4px;
       text-transform: uppercase;
       margin-right: 6px;
@@ -262,8 +328,39 @@
     .card-title { font-size: 15px; font-weight: 600; margin: 0 0 4px 0; }
     .card-meta { font-size: 12px; color: var(--text-muted); }
     .card-body { font-size: 14px; line-height: 1.5; color: #334155; margin-top: 8px; }
-    .feed-photo { max-width: 100%; border-radius: 8px; margin-top: 8px; border: 1px solid var(--border); display: block; }
-    .feed-photos-grid { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+
+    /* Feed & Photo Grid */
+    .feed-photos-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .feed-photos-grid.single-item {
+      grid-template-columns: 1fr;
+    }
+    .feed-photo {
+      width: 100%;
+      height: 200px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      display: block;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .feed-photos-grid.single-item .feed-photo {
+      height: auto;
+      max-height: 480px;
+      object-fit: contain;
+      background: #f8fafc;
+    }
+    .feed-photo:hover {
+      transform: scale(1.02);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+
+    /* OCR Details */
     .ocr-details {
       margin-top: 12px;
       background: #f8fafc;
@@ -340,35 +437,169 @@
       gap: 8px;
     }
 
+    /* Action Buttons */
     .action-btn-sm {
       background: #f1f5f9;
       border: 1px solid var(--border);
       color: var(--text-muted);
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 600;
-      padding: 4px 8px;
-      border-radius: 6px;
+      min-height: 36px;
+      padding: 6px 12px;
+      border-radius: 8px;
       cursor: pointer;
       text-decoration: none;
       display: inline-flex;
       align-items: center;
-      gap: 4px;
+      justify-content: center;
+      gap: 5px;
       transition: all 0.15s ease;
+      touch-action: manipulation;
     }
     .action-btn-sm:hover {
       background: #e2e8f0;
-      color: var(--text-main);
+      color: var(--text);
     }
+    .action-btn-sm:active { transform: scale(0.97); }
+
+    /* Search Bar with Icon and Clear */
+    .search-bar-wrap {
+      position: relative;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+    }
+    .search-icon {
+      position: absolute;
+      left: 12px;
+      color: var(--text-muted);
+      font-size: 14px;
+      pointer-events: none;
+    }
+    #feed-search {
+      width: 100%;
+      padding: 10px 36px 10px 36px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      font-size: 14px;
+      background: #ffffff;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    #feed-search:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.12);
+      outline: none;
+    }
+    .search-clear-btn {
+      position: absolute;
+      right: 8px;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 18px;
+      width: 28px;
+      height: 28px;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      border-radius: 50%;
+    }
+    .search-clear-btn:hover { background: #f1f5f9; color: var(--text); }
+
+    /* Lightbox Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+    .modal-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .modal-box {
+      background: #ffffff;
+      border-radius: 12px;
+      max-width: 90vw;
+      max-height: 90vh;
+      max-height: 90dvh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+    .modal-img-wrap {
+      flex: 1;
+      overflow: auto;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #0f172a;
+      max-height: calc(85vh - 54px);
+      max-height: calc(85dvh - 54px);
+    }
+    .modal-img-wrap img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+    .modal-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      background: #ffffff;
+      border-top: 1px solid var(--border);
+      gap: 10px;
+    }
+    .modal-close-btn {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: rgba(0,0,0,0.65);
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 36px;
+      height: 36px;
+      font-size: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      z-index: 10;
+      transition: background 0.2s;
+    }
+    .modal-close-btn:hover { background: rgba(0,0,0,0.9); }
+
+    /* Highlight Pulse */
     .highlight-pulse {
       animation: pulseGlow 2.5s ease-out;
       border-color: var(--primary) !important;
       background: #f0fdf4 !important;
     }
     @keyframes pulseGlow {
-      0% { transform: scale(1.02); box-shadow: 0 0 0 6px rgba(30, 77, 43, 0.35); }
-      50% { box-shadow: 0 0 0 3px rgba(30, 77, 43, 0.15); }
+      0% { transform: scale(1.02); box-shadow: 0 0 0 6px rgba(2, 132, 199, 0.35); }
+      50% { box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15); }
       100% { transform: scale(1); box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
     }
+
+    /* Toast */
     .toast {
       position: fixed;
       bottom: 24px;
@@ -387,31 +618,32 @@
       pointer-events: none;
     }
     .toast.show { opacity: 1; }
-    .source-item { cursor: pointer; transition: background 0.15s; }
-    .source-item:hover { background: #f1f5f9; }
   </style>
 </head>
 <body>
 
-  <header>
-    <div class="header-title">
-      <h1>🎒 Dojo Zen</h1>
-      <p>Classroom Assistant for Daniel &amp; Family</p>
-    </div>
-    <button class="sync-btn" id="sync-btn" onclick="triggerSync()">
-      <span id="sync-icon">🔄</span> Sync Now
-    </button>
-  </header>
+  <!-- Sticky Top Navigation Container -->
+  <div class="sticky-nav-container">
+    <header>
+      <div class="header-title">
+        <h1>🎒 Dojo Zen</h1>
+        <p>Classroom Assistant for Daniel &amp; Family</p>
+      </div>
+      <button class="sync-btn" id="sync-btn" onclick="triggerSync()" aria-label="Sync classroom updates">
+        <span id="sync-icon">🔄</span> <span class="sync-label">Sync Now</span>
+      </button>
+    </header>
 
-  <div class="tabs">
-    <button class="tab-btn active" onclick="switchTab('chat')">💬 Ask Dojo</button>
-    <button class="tab-btn" onclick="switchTab('briefing')">🎒 Today's Briefing</button>
-    <button class="tab-btn" onclick="switchTab('feed')">📰 Class Feed</button>
+    <nav class="tabs" role="tablist" aria-label="Primary Sections">
+      <button class="tab-btn active" role="tab" id="tab-chat" aria-selected="true" aria-controls="chat-pane" onclick="switchTab('chat')">💬 Ask Dojo</button>
+      <button class="tab-btn" role="tab" id="tab-briefing" aria-selected="false" aria-controls="briefing-pane" onclick="switchTab('briefing')">🎒 Today's Briefing</button>
+      <button class="tab-btn" role="tab" id="tab-feed" aria-selected="false" aria-controls="feed-pane" onclick="switchTab('feed')">📰 Class Feed</button>
+    </nav>
   </div>
 
   <main>
     <!-- TAB 1: Chat / Q&A -->
-    <div id="chat-pane" class="tab-pane active">
+    <div id="chat-pane" class="tab-pane active" role="tabpanel" aria-labelledby="tab-chat">
       <div id="chat-history">
         <div class="chat-bubble bubble-agent">
           👋 Hi! I'm your ClassDojo assistant. Ask me anything about what's happening in your child's class, homework, or upcoming dates!
@@ -427,45 +659,71 @@
       </div>
 
       <form class="chat-input-bar" onsubmit="submitQuestion(event)">
-        <input type="text" id="query-input" placeholder="Ask anything about class (e.g. what to wear, homework)..." autocomplete="off" />
-        <button type="submit" class="send-btn" id="send-btn">➤</button>
+        <input type="text" id="query-input" placeholder="Ask anything about class (e.g. what to wear, homework)..." autocomplete="off" aria-label="Ask anything about class" />
+        <button type="submit" class="send-btn" id="send-btn" aria-label="Send question">➤</button>
       </form>
     </div>
 
     <!-- TAB 2: Live Briefing -->
-    <div id="briefing-pane" class="tab-pane">
+    <div id="briefing-pane" class="tab-pane" role="tabpanel" aria-labelledby="tab-briefing">
       <div id="briefing-content">
-        <p style="text-align: center; color: var(--text-muted); padding: 20px;">Loading latest briefing...</p>
+        <p style="text-align: center; color: var(--text-muted); padding: 24px;">Loading latest briefing...</p>
       </div>
     </div>
 
     <!-- TAB 3: Classroom Feed -->
-    <div id="feed-pane" class="tab-pane">
-      <div style="margin-bottom: 12px;">
-        <input type="text" id="feed-search" placeholder="Search past announcements..." oninput="filterFeed()" style="width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); font-size: 14px;" />
+    <div id="feed-pane" class="tab-pane" role="tabpanel" aria-labelledby="tab-feed">
+      <div class="search-bar-wrap">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="feed-search" placeholder="Search past announcements &amp; teacher posts..." oninput="handleFeedSearchInput()" aria-label="Search past announcements" />
+        <button type="button" class="search-clear-btn" id="search-clear-btn" onclick="clearFeedSearch()" aria-label="Clear search">&times;</button>
       </div>
       <div id="feed-list">
-        <p style="text-align: center; color: var(--text-muted); padding: 20px;">Loading classroom feed...</p>
+        <p style="text-align: center; color: var(--text-muted); padding: 24px;">Loading classroom feed...</p>
       </div>
     </div>
   </main>
 
+  <!-- Lightbox Modal for Full Image Inspection -->
+  <div id="image-modal" class="modal-overlay" onclick="closeImageModal(event)" role="dialog" aria-modal="true" aria-label="Image preview">
+    <div class="modal-box">
+      <button class="modal-close-btn" onclick="closeImageModal(event)" aria-label="Close image preview">&times;</button>
+      <div class="modal-img-wrap">
+        <img id="modal-img" src="" alt="Full resolution attachment" />
+      </div>
+      <div class="modal-footer">
+        <span id="modal-caption" style="font-size: 13px; font-weight: 500; color: #334155;"></span>
+        <a id="modal-raw-link" href="#" target="_blank" rel="noopener" class="action-btn-sm">Open Full Original ↗</a>
+      </div>
+    </div>
+  </div>
+
   <script>
     let allFeedItems = [];
+    let searchDebounceTimer = null;
 
     function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.remove('active');
+        b.setAttribute('aria-selected', 'false');
+      });
       document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
 
       if (tabId === 'chat') {
-        document.querySelectorAll('.tab-btn')[0].classList.add('active');
+        const btn = document.getElementById('tab-chat');
+        btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
         document.getElementById('chat-pane').classList.add('active');
       } else if (tabId === 'briefing') {
-        document.querySelectorAll('.tab-btn')[1].classList.add('active');
+        const btn = document.getElementById('tab-briefing');
+        btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
         document.getElementById('briefing-pane').classList.add('active');
         loadBriefing();
       } else if (tabId === 'feed') {
-        document.querySelectorAll('.tab-btn')[2].classList.add('active');
+        const btn = document.getElementById('tab-feed');
+        btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
         document.getElementById('feed-pane').classList.add('active');
         loadFeed();
       }
@@ -491,11 +749,15 @@
       history.appendChild(userBubble);
       input.value = '';
 
-      // Add loading bubble
+      // Add animated loading bubble
       const loadingBubble = document.createElement('div');
       loadingBubble.className = 'chat-bubble bubble-agent';
       loadingBubble.id = 'loading-bubble';
-      loadingBubble.innerHTML = 'Thinking and checking classroom notices...';
+      loadingBubble.innerHTML = `
+        <div class="typing-indicator">
+          <div class="typing-dots"><span></span><span></span><span></span></div>
+          <span>Checking classroom updates &amp; notices...</span>
+        </div>`;
       history.appendChild(loadingBubble);
       history.scrollTop = history.scrollHeight;
 
@@ -519,7 +781,7 @@
           data.sources.forEach(s => {
             html += `
               <div class="source-item" onclick="jumpToItem('${escapeHtml(s.item_id)}')" title="Click to view in Class Feed">
-                <div class="source-meta" style="display: flex; justify-content: space-between;">
+                <div class="source-meta" style="display: flex; justify-content: space-between; align-items: center;">
                   <span>${escapeHtml(s.author)} &bull; ${escapeHtml(s.posted_at_str)}</span>
                   <span style="color: var(--primary); font-weight: 600; font-size: 11px;">View in Feed ↗</span>
                 </div>
@@ -530,7 +792,7 @@
         }
 
         if (data.suggested_followups && data.suggested_followups.length > 0) {
-          html += `<div class="chip-container" style="margin-top: 10px;">`;
+          html += `<div class="chip-container" style="margin-top: 12px;">`;
           data.suggested_followups.forEach(f => {
             html += `<button class="chip" onclick="askChip('${escapeHtml(f)}')">${escapeHtml(f)}</button>`;
           });
@@ -554,46 +816,126 @@
 
         let html = '';
 
+        // 1. Action Items
         if (b.action_items && b.action_items.length > 0) {
-          html += `<h3 style="color: var(--urgent); margin: 16px 0 8px 0; font-size: 15px;">🚨 ACTION ITEMS &amp; TO-DOS</h3>`;
+          html += `<h3 style="color: var(--urgent); margin: 16px 0 10px 0; font-size: 15px; letter-spacing: 0.02em;">🚨 ACTION ITEMS &amp; TO-DOS</h3>`;
           b.action_items.forEach(a => {
             const urgentBadge = a.urgency === 'high' ? `<span class="badge badge-urgent">URGENT</span>` : '';
+            const imagesHtml = renderBriefingImages(a.image_urls, a.summary);
             html += `
               <div class="card card-urgent">
-                <div class="card-title">${urgentBadge}${escapeHtml(a.summary)}</div>
-                <div class="card-meta">📅 Posted: ${escapeHtml(a.posted_at_str)} &bull; ${escapeHtml(a.author || '')}</div>
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                  <div>
+                    <div class="card-title">${urgentBadge}${escapeHtml(a.summary)}</div>
+                    <div class="card-meta">📅 Posted: ${escapeHtml(a.posted_at_str)} &bull; ${escapeHtml(a.author || '')}</div>
+                  </div>
+                  ${a.item_id ? `<button class="action-btn-sm" onclick="jumpToItem('${escapeHtml(a.item_id)}')">View in Feed ↗</button>` : ''}
+                </div>
+                ${imagesHtml}
               </div>`;
           });
         }
 
+        // 2. Upcoming Dates
         if (b.upcoming_dates && b.upcoming_dates.length > 0) {
-          html += `<h3 style="color: var(--primary); margin: 20px 0 8px 0; font-size: 15px;">📅 UPCOMING DATES &amp; EVENTS</h3>`;
+          html += `<h3 style="color: var(--primary); margin: 22px 0 10px 0; font-size: 15px; letter-spacing: 0.02em;">📅 UPCOMING DATES &amp; EVENTS</h3>`;
           b.upcoming_dates.forEach(d => {
+            const imagesHtml = renderBriefingImages(d.image_urls, d.title);
             html += `
-              <div class="card">
-                <div class="card-title">${escapeHtml(d.title)}</div>
-                <div class="card-meta">📅 Posted: ${escapeHtml(d.posted_at_str || '')} &bull; ${escapeHtml(d.author || '')}</div>
-                ${d.details ? `<div class="card-body">${escapeHtml(d.details)}</div>` : ''}
+              <div class="card" style="border-left: 4px solid var(--primary); background: #eff6ff;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                  <div>
+                    <div class="card-title" style="color: #1e3a8a;">${escapeHtml(d.title)}</div>
+                    <div class="card-meta">📅 Posted: ${escapeHtml(d.posted_at_str || '')} &bull; ${escapeHtml(d.author || '')}</div>
+                  </div>
+                  ${d.item_id ? `<button class="action-btn-sm" onclick="jumpToItem('${escapeHtml(d.item_id)}')">View in Feed ↗</button>` : ''}
+                </div>
+                ${d.details && d.details !== d.title ? `<div class="card-body">${escapeHtml(d.details)}</div>` : ''}
+                ${imagesHtml}
               </div>`;
           });
         }
 
+        // 3. Teacher Messages (Full Parity with Email Digest)
+        if (b.teacher_notes && b.teacher_notes.length > 0) {
+          html += `<h3 style="color: #059669; margin: 22px 0 10px 0; font-size: 15px; letter-spacing: 0.02em;">💬 TEACHER MESSAGES</h3>`;
+          b.teacher_notes.forEach(m => {
+            html += `
+              <div class="card" style="border-left: 4px solid #10b981; background: #ecfdf5;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                  <div>
+                    <div class="card-title" style="color: #065f46;">From: ${escapeHtml(m.sender)}</div>
+                    <div class="card-meta">📅 Sent: ${escapeHtml(m.posted_at_str)}</div>
+                  </div>
+                  ${m.item_id ? `<button class="action-btn-sm" onclick="jumpToItem('${escapeHtml(m.item_id)}')">View in Feed ↗</button>` : ''}
+                </div>
+                <div class="card-body" style="color: #1e293b; font-size: 14.5px; margin-top: 6px;">&ldquo;${escapeHtml(m.body)}&rdquo;</div>
+              </div>`;
+          });
+        }
+
+        // 4. Classroom Highlights
         if (b.classroom_highlights && b.classroom_highlights.length > 0) {
-          html += `<h3 style="color: var(--accent); margin: 20px 0 8px 0; font-size: 15px;">🌟 RECENT CLASSROOM HIGHLIGHTS</h3>`;
+          html += `<h3 style="color: var(--accent); margin: 22px 0 10px 0; font-size: 15px; letter-spacing: 0.02em;">🌟 RECENT CLASSROOM HIGHLIGHTS</h3>`;
           b.classroom_highlights.forEach(h => {
+            const imagesHtml = renderBriefingImages(h.image_urls, h.author);
             html += `
-              <div class="card">
-                <div class="card-title">${escapeHtml(h.author)}</div>
-                <div class="card-meta">📅 Posted: ${escapeHtml(h.posted_at_str)}</div>
+              <div class="card" style="border-left: 4px solid #8b5cf6; background: #f5f3ff;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                  <div>
+                    <div class="card-title" style="color: #5b21b6;">${escapeHtml(h.author)}</div>
+                    <div class="card-meta">📅 Posted: ${escapeHtml(h.posted_at_str)} ${h.attachment_count ? `&bull; 📷 ${h.attachment_count} photo(s)` : ''}</div>
+                  </div>
+                  ${h.item_id ? `<button class="action-btn-sm" onclick="jumpToItem('${escapeHtml(h.item_id)}')">View in Feed ↗</button>` : ''}
+                </div>
                 <div class="card-body">${escapeHtml(h.text)}</div>
+                ${imagesHtml}
               </div>`;
           });
         }
 
-        container.innerHTML = html || '<p style="text-align: center; color: var(--text-muted);">No current action items. All caught up!</p>';
+        // 5. Past Notices
+        if (b.expired_action_items && b.expired_action_items.length > 0) {
+          html += `<h3 style="color: #64748b; margin: 24px 0 10px 0; font-size: 14px; letter-spacing: 0.02em;">📜 PAST NOTICES (From earlier weeks)</h3>`;
+          b.expired_action_items.forEach(p => {
+            html += `
+              <div class="card" style="border-left: 4px solid #94a3b8; opacity: 0.9;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                  <div>
+                    <div class="card-title"><span class="badge badge-past">PAST</span>${escapeHtml(p.summary)}</div>
+                    <div class="card-meta">📅 Posted: ${escapeHtml(p.posted_at_str)} &bull; ${escapeHtml(p.author || '')}</div>
+                  </div>
+                  ${p.item_id ? `<button class="action-btn-sm" onclick="jumpToItem('${escapeHtml(p.item_id)}')">View in Feed ↗</button>` : ''}
+                </div>
+              </div>`;
+          });
+        }
+
+        // Summary footer
+        if (b.raw_item_count !== undefined) {
+          html += `
+            <div style="text-align: center; margin-top: 24px; padding: 16px; font-size: 12px; color: var(--text-muted); border-top: 1px solid var(--border);">
+              Generated automatically by Dojo Anti-Bloat Agent &bull; Total processed: ${b.raw_item_count}
+              ${b.filtered_bloat_count ? ` &bull; Filtered out ${b.filtered_bloat_count} promotional items` : ''}
+            </div>`;
+        }
+
+        container.innerHTML = html || '<p style="text-align: center; color: var(--text-muted); padding: 24px;">No current action items. All caught up!</p>';
       } catch (e) {
-        container.innerHTML = `<p style="color: var(--urgent);">Failed to load briefing: ${e.message}</p>`;
+        container.innerHTML = `<p style="color: var(--urgent); padding: 20px;">Failed to load briefing: ${e.message}</p>`;
       }
+    }
+
+    function renderBriefingImages(images, caption) {
+      if (!images || images.length === 0) return '';
+      const isSingle = images.length === 1;
+      let out = `<div class="feed-photos-grid ${isSingle ? 'single-item' : ''}">`;
+      images.forEach(img => {
+        out += `
+          <img src="${escapeHtml(img)}" class="feed-photo" loading="lazy" alt="Attachment" onclick="openLightbox('${escapeHtml(img)}', '${escapeHtml(caption || 'Attachment')}')" />`;
+      });
+      out += '</div>';
+      return out;
     }
 
     async function loadFeed() {
@@ -604,15 +946,34 @@
         allFeedItems = data.items || [];
         renderFeed(allFeedItems);
       } catch (e) {
-        container.innerHTML = `<p style="color: var(--urgent);">Failed to load feed: ${e.message}</p>`;
+        container.innerHTML = `<p style="color: var(--urgent); padding: 20px;">Failed to load feed: ${e.message}</p>`;
       }
     }
 
+    function handleFeedSearchInput() {
+      const input = document.getElementById('feed-search');
+      const clearBtn = document.getElementById('search-clear-btn');
+      if (clearBtn) {
+        clearBtn.style.display = input.value ? 'flex' : 'none';
+      }
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(filterFeed, 150);
+    }
+
+    function clearFeedSearch() {
+      const input = document.getElementById('feed-search');
+      input.value = '';
+      document.getElementById('search-clear-btn').style.display = 'none';
+      filterFeed();
+      input.focus();
+    }
+
     function filterFeed() {
-      const q = document.getElementById('feed-search').value.toLowerCase();
+      const q = (document.getElementById('feed-search').value || '').toLowerCase().trim();
       const filtered = allFeedItems.filter(item => 
         (item.author && item.author.toLowerCase().includes(q)) ||
-        (item.text && item.text.toLowerCase().includes(q))
+        (item.text && item.text.toLowerCase().includes(q)) ||
+        (item.header && item.header.toLowerCase().includes(q))
       );
       renderFeed(filtered);
     }
@@ -620,7 +981,7 @@
     function renderFeed(items) {
       const container = document.getElementById('feed-list');
       if (items.length === 0) {
-        container.innerHTML = `<p style="text-align: center; color: var(--text-muted); padding: 20px;">No posts match your search.</p>`;
+        container.innerHTML = `<p style="text-align: center; color: var(--text-muted); padding: 30px;">No posts match your search.</p>`;
         return;
       }
       let html = '';
@@ -630,14 +991,13 @@
         const ocrList = it.ocr_data || [];
 
         if (attachments.length > 0) {
-          attachmentsHtml += '<div class="feed-photos-grid">';
+          const isSingle = attachments.length === 1;
+          attachmentsHtml += `<div class="feed-photos-grid ${isSingle ? 'single-item' : ''}">`;
           attachments.forEach(att => {
             const path = att.path || att.url;
             if (path) {
               attachmentsHtml += `
-                <a href="${escapeHtml(path)}" target="_blank" rel="noopener" title="Click to view full image in new tab">
-                  <img src="${escapeHtml(path)}" class="feed-photo" loading="lazy" alt="Post Attachment" />
-                </a>`;
+                <img src="${escapeHtml(path)}" class="feed-photo" loading="lazy" alt="Post Attachment" onclick="openLightbox('${escapeHtml(path)}', '${escapeHtml(it.author || 'Post Attachment')}')" />`;
             }
           });
           attachmentsHtml += '</div>';
@@ -695,7 +1055,7 @@
                 <div class="card-meta">📅 Posted: ${escapeHtml(it.posted_at_str)}</div>
               </div>
               <div style="display: flex; gap: 6px; flex-shrink: 0;">
-                <button class="action-btn-sm" onclick="copyDeepLink('${it.id}')" title="Copy direct link to this message">🔗 Share</button>
+                <button class="action-btn-sm" onclick="copyDeepLink('${it.id}')" title="Copy direct link to this post">🔗 Share</button>
                 <a class="action-btn-sm" href="https://home.classdojo.com/#/story/${it.id}" target="_blank" rel="noopener" title="Open original in ClassDojo">↗ Dojo</a>
               </div>
             </div>
@@ -705,6 +1065,34 @@
       });
       container.innerHTML = html;
     }
+
+    /* Lightbox Modal */
+    function openLightbox(imgUrl, caption) {
+      const modal = document.getElementById('image-modal');
+      const modalImg = document.getElementById('modal-img');
+      const modalCap = document.getElementById('modal-caption');
+      const rawLink = document.getElementById('modal-raw-link');
+      modalImg.src = imgUrl;
+      modalCap.innerText = caption || 'Classroom Attachment';
+      rawLink.href = imgUrl;
+      modal.classList.add('open');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeImageModal(e) {
+      if (e && e.target && (e.target.id === 'modal-img' || e.target.id === 'modal-raw-link')) {
+        return;
+      }
+      const modal = document.getElementById('image-modal');
+      modal.classList.remove('open');
+      document.body.style.overflow = '';
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeImageModal();
+      }
+    });
 
     async function triggerOcrScan(itemId) {
       const btn = document.getElementById(`scan-btn-${itemId}`);
@@ -820,10 +1208,17 @@
 
     function formatMarkdown(text) {
       if (!text) return '';
+      // Headers
+      text = text.replace(/^### (.*?)$/gm, '<h4 style="margin: 8px 0 4px 0; font-size: 15px; color: var(--text);">$1</h4>');
+      text = text.replace(/^## (.*?)$/gm, '<h3 style="margin: 10px 0 4px 0; font-size: 16px; color: var(--text);">$1</h3>');
       // Bold
       text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-      // Bullets
-      text = text.replace(/^• (.*?)$/gm, '<li style="margin-bottom: 6px;">$1</li>');
+      // Italics
+      text = text.replace(/\*(.*?)\*/g, '<em>$1</em>');
+      // Numbered lists
+      text = text.replace(/^\d+\.\s+(.*?)$/gm, '<li style="margin-bottom: 4px;">$1</li>');
+      // Bullet lists
+      text = text.replace(/^[•\-\*]\s+(.*?)$/gm, '<li style="margin-bottom: 4px;">$1</li>');
       text = text.replace(/(<li.*<\/li>)/s, '<ul style="padding-left: 20px; margin: 8px 0;">$1</ul>');
       // Line breaks
       text = text.replace(/\n\n/g, '<br><br>');
