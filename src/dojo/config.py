@@ -56,7 +56,7 @@ class Settings(BaseModel):
 
     # Web Portal URL for Email Links
     app_base_url: str = Field(
-        default_factory=lambda: os.getenv("APP_BASE_URL", "https://dojo-zen-647998166555.us-central1.run.app")
+        default_factory=lambda: os.getenv("APP_BASE_URL", "https://dojo.herrington.ai")
     )
 
     cron_secret: str = Field(default_factory=lambda: os.getenv("CRON_SECRET", "dojo-zen-cron-token"))
