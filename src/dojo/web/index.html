@@ -133,12 +133,15 @@
     @media (max-width: 640px) {
       main { padding: 12px; }
     }
-    .tab-pane { display: none; width: 100%; }
-    .tab-pane.active { display: block; }
-
-    /* Chat Area */
-    #chat-pane {
-      display: flex;
+    .tab-pane {
+      display: none !important;
+      width: 100%;
+    }
+    .tab-pane.active {
+      display: block !important;
+    }
+    #chat-pane.active {
+      display: flex !important;
       flex-direction: column;
       height: calc(100vh - 145px);
       height: calc(100dvh - 145px);
@@ -711,21 +714,37 @@
 
       if (tabId === 'chat') {
         const btn = document.getElementById('tab-chat');
-        btn.classList.add('active');
-        btn.setAttribute('aria-selected', 'true');
-        document.getElementById('chat-pane').classList.add('active');
+        if (btn) {
+          btn.classList.add('active');
+          btn.setAttribute('aria-selected', 'true');
+        }
+        const pane = document.getElementById('chat-pane');
+        if (pane) pane.classList.add('active');
       } else if (tabId === 'briefing') {
         const btn = document.getElementById('tab-briefing');
-        btn.classList.add('active');
-        btn.setAttribute('aria-selected', 'true');
-        document.getElementById('briefing-pane').classList.add('active');
+        if (btn) {
+          btn.classList.add('active');
+          btn.setAttribute('aria-selected', 'true');
+        }
+        const pane = document.getElementById('briefing-pane');
+        if (pane) pane.classList.add('active');
         loadBriefing();
       } else if (tabId === 'feed') {
         const btn = document.getElementById('tab-feed');
-        btn.classList.add('active');
-        btn.setAttribute('aria-selected', 'true');
-        document.getElementById('feed-pane').classList.add('active');
+        if (btn) {
+          btn.classList.add('active');
+          btn.setAttribute('aria-selected', 'true');
+        }
+        const pane = document.getElementById('feed-pane');
+        if (pane) pane.classList.add('active');
         loadFeed();
+      }
+
+      window.scrollTo({ top: 0, behavior: 'instant' });
+      if (history.replaceState) {
+        const u = new URL(window.location);
+        u.searchParams.set('tab', tabId);
+        history.replaceState(null, '', u);
       }
     }
 
