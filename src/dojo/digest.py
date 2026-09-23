@@ -1,7 +1,7 @@
 """Anti-bloat digest and summarization engine for ClassDojo content."""
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
 
@@ -29,8 +29,316 @@ ACTION_KEYWORDS = [
 DATE_KEYWORDS = [
     "early dismissal", "early release", "no school", "holiday", "closed",
     "field trip", "picture day", "spirit week", "conference", "assembly",
-    "book fair", "parade", "open house", "half day", "starts at", "ends at"
+    "book fair", "parade", "open house", "half day", "starts at", "ends at", "weekend"
 ]
+
+WEEKDAYS = {
+    "monday": 0, "mon": 0,
+    "tuesday": 1, "tue": 1, "tues": 1,
+    "wednesday": 2, "wed": 2,
+    "thursday": 3, "thu": 3, "thur": 3, "thurs": 3,
+    "friday": 4, "fri": 4,
+    "saturday": 5, "sat": 5,
+    "sunday": 6, "sun": 6
+}
+
+MONTHS = {
+    "jan": 1, "january": 1,
+    "feb": 2, "february": 2,
+    "mar": 3, "march": 3,
+    "apr": 4, "april": 4,
+    "may": 5,
+    "jun": 6, "june": 6,
+    "jul": 7, "july": 7,
+    "aug": 8, "august": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12
+}
+
+
+def parse_raw_datetime(raw_time: Any) -> Optional[datetime]:
+    """Parse raw timestamp (ISO string, datetime, or date) into a timezone-aware datetime."""
+    if not raw_time:
+        return None
+    if isinstance(raw_time, datetime):
+        return raw_time.astimezone() if raw_time.tzinfo else raw_time.replace(tzinfo=timezone.utc).astimezone()
+    if isinstance(raw_time, date):
+        return datetime(raw_time.year, raw_time.month, raw_time.day).astimezone()
+    s = str(raw_time).strip()
+    try:
+        clean = s.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(clean)
+        return dt.astimezone()
+    except Exception:
+        pass
+    match = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})", s)
+    if match:
+        try:
+            return datetime(int(match.group(1)), int(match.group(2)), int(match.group(3))).astimezone()
+        except Exception:
+            pass
+    return None
+
+
+def parse_date_or_datetime(val: Any) -> Optional[date]:
+    """Parse string, datetime, or date into a date object."""
+    if not val:
+        return None
+    if isinstance(val, datetime):
+        return val.date()
+    if isinstance(val, date):
+        return val
+    s = str(val).strip()
+    try:
+        clean = s.replace("Z", "+00:00")
+        return datetime.fromisoformat(clean).date()
+    except Exception:
+        pass
+    match_iso = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})", s)
+    if match_iso:
+        try:
+            return date(int(match_iso.group(1)), int(match_iso.group(2)), int(match_iso.group(3)))
+        except Exception:
+            pass
+    date_match = re.search(
+        r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b",
+        s,
+        re.IGNORECASE,
+    )
+    if date_match:
+        m_str = date_match.group(1)[:3].lower()
+        m_num = MONTHS.get(m_str)
+        d_num = int(date_match.group(2))
+        y_num = int(date_match.group(3)) if date_match.group(3) else datetime.now().year
+        try:
+            return date(y_num, m_num, d_num)
+        except Exception:
+            pass
+    return None
+
+
+def evaluate_item_temporal_status(
+    text: str,
+    post_dt: Optional[datetime],
+    ref_dt: Optional[datetime] = None
+) -> Dict[str, Any]:
+    """
+    Evaluates relative time expressions in text relative to post_dt and ref_dt.
+    Detects tomorrow, tonight, today, weekends, days of week, explicit dates, and undated posts.
+    """
+    if ref_dt is None:
+        ref_dt = datetime.now().astimezone()
+    if post_dt is None:
+        post_dt = ref_dt
+
+    post_date = post_dt.date()
+    ref_date = ref_dt.date()
+    days_since_post = (ref_date - post_date).days
+    lower = text.lower()
+
+    # 1. "Tomorrow" / "tmrw"
+    if re.search(r"\b(tomorrow|tmrw)\b", lower):
+        target_date = post_date + timedelta(days=1)
+        if target_date < ref_date:
+            return {
+                "is_expired": True,
+                "is_today": False,
+                "is_transient": True,
+                "target_date": target_date,
+                "contextualized_summary": text,
+                "urgency": "expired",
+            }
+        elif target_date == ref_date:
+            clean = text.strip()
+            # If text has e.g. "💚 Don't forget to wear GREEN tomorrow", strip "tomorrow" and prefix "Today: "
+            sub_text = re.sub(r"\s+\b(?:tomorrow|tmrw)\b\.?", "", clean, flags=re.IGNORECASE)
+            sub_text = re.sub(r"\btomorrow\s+is\b", "Today is", sub_text, flags=re.IGNORECASE)
+            sub_text = re.sub(r"\btmrw\s+is\b", "Today is", sub_text, flags=re.IGNORECASE)
+            if not sub_text.lower().startswith("today") and not sub_text.lower().startswith("reminder: today"):
+                rewritten = f"Today: {sub_text}"
+            else:
+                rewritten = sub_text
+            return {
+                "is_expired": False,
+                "is_today": True,
+                "is_transient": True,
+                "target_date": target_date,
+                "contextualized_summary": rewritten,
+                "urgency": "high",
+            }
+        else:
+            rewritten = text if text.lower().startswith("tomorrow") else f"Tomorrow: {text}"
+            return {
+                "is_expired": False,
+                "is_today": False,
+                "is_transient": True,
+                "target_date": target_date,
+                "contextualized_summary": rewritten,
+                "urgency": "normal",
+            }
+
+    # 2. "Tonight", "today", "this morning", "this afternoon", "this evening"
+    same_day_match = re.search(r"\b(tonight|today|this morning|this afternoon|this evening)\b", lower)
+    if same_day_match:
+        target_date = post_date
+        if target_date < ref_date:
+            return {
+                "is_expired": True,
+                "is_today": False,
+                "is_transient": True,
+                "target_date": target_date,
+                "contextualized_summary": text,
+                "urgency": "expired",
+            }
+        elif target_date == ref_date:
+            return {
+                "is_expired": False,
+                "is_today": True,
+                "is_transient": True,
+                "target_date": target_date,
+                "contextualized_summary": text,
+                "urgency": "high",
+            }
+
+    # 3. Explicit Calendar Dates (e.g. "Sep 18", "September 21st", "9/21")
+    date_match = re.search(
+        r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?\b",
+        lower,
+    )
+    if date_match:
+        month_name = date_match.group(1)[:3].lower()
+        month_num = MONTHS.get(month_name, 1)
+        day_num = int(date_match.group(2))
+        try:
+            target_date = date(post_date.year, month_num, day_num)
+            if target_date < ref_date:
+                return {
+                    "is_expired": True,
+                    "is_today": False,
+                    "is_transient": True,
+                    "target_date": target_date,
+                    "contextualized_summary": text,
+                    "urgency": "expired",
+                }
+            elif target_date == ref_date:
+                rewritten = text if text.lower().startswith("today") else f"Today: {text}"
+                return {
+                    "is_expired": False,
+                    "is_today": True,
+                    "is_transient": True,
+                    "target_date": target_date,
+                    "contextualized_summary": rewritten,
+                    "urgency": "high",
+                }
+            else:
+                return {
+                    "is_expired": False,
+                    "is_today": False,
+                    "is_transient": True,
+                    "target_date": target_date,
+                    "contextualized_summary": text,
+                    "urgency": "normal",
+                }
+        except ValueError:
+            pass
+
+    # 4. "This weekend", "the weekend"
+    if "this weekend" in lower or "the weekend" in lower:
+        days_to_sun = (6 - post_date.weekday()) % 7
+        target_sunday = post_date + timedelta(days=days_to_sun)
+        if ref_date > target_sunday:
+            return {
+                "is_expired": True,
+                "is_today": False,
+                "is_transient": True,
+                "target_date": target_sunday,
+                "contextualized_summary": text,
+                "urgency": "expired",
+            }
+        elif ref_date >= post_date + timedelta(days=(5 - post_date.weekday()) % 7):
+            return {
+                "is_expired": False,
+                "is_today": True,
+                "is_transient": True,
+                "target_date": target_sunday,
+                "contextualized_summary": text,
+                "urgency": "high",
+            }
+        else:
+            return {
+                "is_expired": False,
+                "is_today": False,
+                "is_transient": True,
+                "target_date": target_sunday,
+                "contextualized_summary": text,
+                "urgency": "normal",
+            }
+
+    # 5. Day of the week (Monday - Sunday)
+    weekday_match = re.search(
+        r"\b(?:on\s+|this\s+|next\s+|by\s+|due\s+|is\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?!(?:\s+and\s+\w+)?\s+(?:pages?|packets?|sheets?|worksheets?|folders?))\b",
+        lower,
+    )
+    if weekday_match:
+        target_day_name = weekday_match.group(1).lower()
+        target_weekday = WEEKDAYS[target_day_name]
+        post_weekday = post_date.weekday()
+
+        day_diff = (target_weekday - post_weekday) % 7
+        if "next" in lower and day_diff == 0:
+            day_diff = 7
+
+        target_date = post_date + timedelta(days=day_diff)
+        if target_date < ref_date:
+            return {
+                "is_expired": True,
+                "is_today": False,
+                "is_transient": True,
+                "target_date": target_date,
+                "contextualized_summary": text,
+                "urgency": "expired",
+            }
+        elif target_date == ref_date:
+            rewritten = text if text.lower().startswith("today") else f"Today ({target_day_name.capitalize()}): {text}"
+            return {
+                "is_expired": False,
+                "is_today": True,
+                "is_transient": True,
+                "target_date": target_date,
+                "contextualized_summary": rewritten,
+                "urgency": "high",
+            }
+        else:
+            return {
+                "is_expired": False,
+                "is_today": False,
+                "is_transient": True,
+                "target_date": target_date,
+                "contextualized_summary": text,
+                "urgency": "normal",
+            }
+
+    # 6. Fallback for undated posts:
+    if days_since_post >= 3:
+        return {
+            "is_expired": True,
+            "is_today": False,
+            "is_transient": False,
+            "target_date": post_date,
+            "contextualized_summary": text,
+            "urgency": "expired",
+        }
+
+    return {
+        "is_expired": False,
+        "is_today": days_since_post == 0,
+        "is_transient": False,
+        "target_date": post_date,
+        "contextualized_summary": text,
+        "urgency": "normal",
+    }
 
 
 def parse_and_format_timestamp(raw_time: Optional[str]) -> Tuple[str, bool]:
@@ -87,6 +395,7 @@ class ActionItem(BaseModel):
     urgency: str = "normal"  # "high", "normal", "expired"
     posted_at_str: str = "Recently"
     is_stale: bool = False
+    is_transient: bool = False
     image_urls: List[str] = Field(default_factory=list)
     item_id: Optional[str] = None
 
@@ -99,6 +408,7 @@ class UpcomingDate(BaseModel):
     author: Optional[str] = None
     image_urls: List[str] = Field(default_factory=list)
     item_id: Optional[str] = None
+    is_stale: bool = False
 
 
 class TeacherNote(BaseModel):
@@ -137,8 +447,13 @@ class Briefing(BaseModel):
 
     @property
     def expired_action_items(self) -> List[ActionItem]:
-        """Returns older historical action items where the date has already passed."""
-        return [a for a in self.action_items if a.is_stale]
+        """Returns older historical action items where the date has already passed, omitting transient single-day noise."""
+        return [a for a in self.action_items if a.is_stale and not a.is_transient]
+
+    @property
+    def active_upcoming_dates(self) -> List[UpcomingDate]:
+        """Returns upcoming dates that have not already passed."""
+        return [d for d in self.upcoming_dates if not d.is_stale]
 
     def is_empty(self) -> bool:
         return (
@@ -169,11 +484,17 @@ class DigestEngine:
         feed_items: List[Dict[str, Any]],
         messages: List[Dict[str, Any]],
         events: List[Dict[str, Any]],
-        children: Optional[List[Dict[str, Any]]] = None
+        children: Optional[List[Dict[str, Any]]] = None,
+        ref_dt: Optional[datetime] = None
     ) -> Briefing:
         """
         Process feed posts, messages, and calendar events into a clean Briefing.
+        Evaluates relative dates (tomorrow -> Today, past deadlines filtered out).
         """
+        if ref_dt is None:
+            ref_dt = datetime.now().astimezone()
+        ref_date = ref_dt.date()
+
         total_raw = len(feed_items) + len(messages) + len(events)
         bloat_count = 0
 
@@ -190,12 +511,17 @@ class DigestEngine:
             desc = ev.get("description", "")
             start = ev.get("start_time") or "Upcoming"
             posted_time, _ = parse_and_format_timestamp(ev.get("fetched_at"))
+
+            ev_date = parse_date_or_datetime(start)
+            is_stale_ev = bool(ev_date and ev_date < ref_date)
+
             upcoming_dates.append(UpcomingDate(
                 title=title,
                 date_str=start,
                 details=desc or None,
                 posted_at_str=posted_time,
-                item_id=ev.get("id")
+                item_id=ev.get("id"),
+                is_stale=is_stale_ev
             ))
 
         # 2. Process Direct Teacher Messages
@@ -207,6 +533,7 @@ class DigestEngine:
 
             sender = msg.get("sender_name") or "Teacher"
             msg_time_val = msg.get("message_timestamp")
+            msg_dt = parse_raw_datetime(msg_time_val)
             posted_str, is_stale_msg = parse_and_format_timestamp(msg_time_val)
 
             teacher_notes.append(TeacherNote(
@@ -220,18 +547,16 @@ class DigestEngine:
             # Scan message body for action items
             lower_body = body.lower()
             if any(k in lower_body for k in ACTION_KEYWORDS):
-                is_same_day = any(w in lower_body for w in ["today", "tonight", "this evening", "asap", "immediately"])
-                is_tomorrow = "tomorrow" in lower_body
-                is_stale = is_stale_msg and (is_same_day or is_tomorrow)
-                urgency = "expired" if is_stale else ("high" if (is_same_day and not is_stale) else "normal")
-
+                action_sent = self._extract_action_sentence(body)
+                eval_res = evaluate_item_temporal_status(action_sent, msg_dt, ref_dt)
                 action_items.append(ActionItem(
-                    summary=self._extract_action_sentence(body),
+                    summary=eval_res["contextualized_summary"] if not eval_res["is_expired"] else action_sent,
                     context=f"Message from {sender}",
                     author=sender,
-                    urgency=urgency,
+                    urgency=eval_res["urgency"],
                     posted_at_str=posted_str,
-                    is_stale=is_stale,
+                    is_stale=eval_res["is_expired"],
+                    is_transient=eval_res.get("is_transient", False),
                     item_id=msg.get("id")
                 ))
 
@@ -249,6 +574,7 @@ class DigestEngine:
             # Resolve author name and class
             author = item.get("author_name") or item.get("senderName") or "Teacher / School"
             raw_time = item.get("item_timestamp")
+            item_dt = parse_raw_datetime(raw_time)
             posted_str, is_stale_post = parse_and_format_timestamp(raw_time)
             lower = content.lower()
 
@@ -278,30 +604,31 @@ class DigestEngine:
             # Check for dates / events in text
             if any(k in lower for k in DATE_KEYWORDS):
                 sentence = self._extract_date_sentence(content)
+                date_eval = evaluate_item_temporal_status(sentence, item_dt, ref_dt)
+                date_title = date_eval["contextualized_summary"] if date_eval["is_today"] else sentence
                 upcoming_dates.append(UpcomingDate(
-                    title=sentence,
+                    title=date_title,
                     date_str=posted_str,
                     details=content[:200],
                     posted_at_str=posted_str,
                     author=author,
                     image_urls=image_urls,
-                    item_id=item_id
+                    item_id=item_id,
+                    is_stale=date_eval["is_expired"]
                 ))
 
             # Check for action items
             if any(k in lower for k in ACTION_KEYWORDS):
-                is_same_day = any(w in lower for w in ["today", "tonight", "this evening", "asap", "immediately"])
-                is_tomorrow = "tomorrow" in lower
-                is_stale = is_stale_post and (is_same_day or is_tomorrow)
-                urgency = "expired" if is_stale else ("high" if (is_same_day and not is_stale) else "normal")
-
+                action_sent = self._extract_action_sentence(content)
+                eval_res = evaluate_item_temporal_status(action_sent, item_dt, ref_dt)
                 action_items.append(ActionItem(
-                    summary=self._extract_action_sentence(content),
+                    summary=eval_res["contextualized_summary"] if not eval_res["is_expired"] else action_sent,
                     context=f"Posted by {author}",
                     author=author,
-                    urgency=urgency,
+                    urgency=eval_res["urgency"],
                     posted_at_str=posted_str,
-                    is_stale=is_stale,
+                    is_stale=eval_res["is_expired"],
+                    is_transient=eval_res.get("is_transient", False),
                     image_urls=image_urls,
                     item_id=item_id
                 ))
@@ -332,12 +659,12 @@ class DigestEngine:
                         if isinstance(sub_ocr, dict):
                             self._integrate_ocr_into_briefing(
                                 sub_ocr, author, posted_str, is_stale_post, action_items, upcoming_dates,
-                                include_images=include_ocr_images, item_id=item_id
+                                include_images=include_ocr_images, item_id=item_id, item_dt=item_dt, ref_dt=ref_dt
                             )
                 elif isinstance(ocr_data, dict):
                     self._integrate_ocr_into_briefing(
                         ocr_data, author, posted_str, is_stale_post, action_items, upcoming_dates,
-                        include_images=include_ocr_images, item_id=item_id
+                        include_images=include_ocr_images, item_id=item_id, item_dt=item_dt, ref_dt=ref_dt
                     )
 
         # Deduplicate actions and dates by summary/title
@@ -402,17 +729,22 @@ class DigestEngine:
         action_items: List[ActionItem],
         upcoming_dates: List[UpcomingDate],
         include_images: bool = True,
-        item_id: Optional[str] = None
+        item_id: Optional[str] = None,
+        item_dt: Optional[datetime] = None,
+        ref_dt: Optional[datetime] = None
     ) -> None:
         if not ocr.get("has_text"):
             return
 
         img_urls = [ocr["image_url"]] if (include_images and ocr.get("image_url")) else []
+        ref_date = ref_dt.date() if ref_dt else datetime.now().astimezone().date()
 
         # Dates from image
         for d in ocr.get("dates", []):
             title = d.get("title") or "School Event"
             date_info = d.get("date_str") or "Upcoming"
+            d_date = parse_date_or_datetime(date_info)
+            is_stale_d = bool(d_date and d_date < ref_date)
             if d.get("time"):
                 date_info += f" at {d['time']}"
             loc = f" ({d['location']})" if d.get("location") else ""
@@ -423,20 +755,22 @@ class DigestEngine:
                 posted_at_str=posted_str,
                 author=author,
                 image_urls=img_urls,
-                item_id=item_id
+                item_id=item_id,
+                is_stale=is_stale_d
             ))
 
         # Action items from image
         for act in ocr.get("action_items", []):
             summary = act.get("summary") if isinstance(act, dict) else str(act)
-            urgency = act.get("urgency", "normal") if isinstance(act, dict) else "normal"
+            eval_res = evaluate_item_temporal_status(summary, item_dt, ref_dt)
             action_items.append(ActionItem(
-                summary=f"[Flyer Note] {summary}",
+                summary=f"[Flyer Note] {eval_res['contextualized_summary'] if not eval_res['is_expired'] else summary}",
                 context=f"From photo/flyer posted by {author}",
                 author=author,
-                urgency=urgency,
+                urgency=eval_res["urgency"],
                 posted_at_str=posted_str,
-                is_stale=is_stale_post,
+                is_stale=eval_res["is_expired"],
+                is_transient=eval_res.get("is_transient", False),
                 image_urls=img_urls,
                 item_id=item_id
             ))
@@ -477,9 +811,10 @@ class DigestEngine:
                 lines.append(f"     └─ Posted: {item.posted_at_str}{author_str}")
             lines.append("")
 
-        if briefing.upcoming_dates:
+        active_dates = briefing.active_upcoming_dates
+        if active_dates:
             lines.append("📅 UPCOMING DATES & SCHEDULE:")
-            for d in briefing.upcoming_dates:
+            for d in active_dates:
                 author_str = f" · {d.author}" if d.author else ""
                 lines.append(f"  • {d.title}")
                 lines.append(f"     └─ Posted: {d.posted_at_str}{author_str}")

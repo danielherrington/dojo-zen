@@ -74,7 +74,7 @@ async def get_briefing():
         "briefing": {
             "generated_at": briefing.generated_at,
             "action_items": [a.model_dump() for a in briefing.active_action_items],
-            "upcoming_dates": [d.model_dump() for d in briefing.upcoming_dates],
+            "upcoming_dates": [d.model_dump() for d in briefing.active_upcoming_dates],
             "teacher_notes": [m.model_dump() for m in briefing.teacher_notes],
             "classroom_highlights": [h.model_dump() for h in briefing.classroom_highlights[:5]],
             "expired_action_items": [e.model_dump() for e in briefing.expired_action_items[:6]],

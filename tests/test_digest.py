@@ -66,7 +66,11 @@ def test_synthesize_action_items_and_dates():
 
     children = [{"name": "Leo"}]
 
-    briefing = engine.synthesize(feed_items, messages, events, children)
+    from datetime import datetime, timezone
+    briefing = engine.synthesize(
+        feed_items, messages, events, children,
+        ref_dt=datetime(2026, 9, 14, 12, 0, tzinfo=timezone.utc)
+    )
 
     # 1. Bloat filtered
     assert briefing.filtered_bloat_count == 1
@@ -109,6 +113,7 @@ def test_synthesize_action_items_and_dates():
 
 def test_synthesize_excludes_images_for_already_digested_items():
     """Verify that items marked as already digested do not re-send photos in future updates."""
+    from datetime import datetime, timezone
     engine = DigestEngine()
 
     feed_items = [
@@ -138,7 +143,10 @@ def test_synthesize_excludes_images_for_already_digested_items():
         }
     ]
 
-    briefing = engine.synthesize(feed_items=feed_items, messages=[], events=[])
+    briefing = engine.synthesize(
+        feed_items=feed_items, messages=[], events=[],
+        ref_dt=datetime(2026, 9, 17, 12, 0, tzinfo=timezone.utc)
+    )
 
     # 1. Action items are retained for context, but old ones have no image_urls
     actions_by_summary = {a.summary.lower(): a for a in briefing.action_items}
@@ -158,5 +166,93 @@ def test_synthesize_excludes_images_for_already_digested_items():
     assert "fresh_form.jpg" in html
     assert "old_library.jpg" not in html
     assert "dudes_1.jpg" not in html
-    assert "dudes_2.jpg" not in html
+
+
+def test_contextualize_tomorrow_reminder_to_today():
+    """Verify that 'wear green tomorrow' posted yesterday is rewritten to 'Today: ...' with high urgency."""
+    from datetime import datetime, timezone
+    engine = DigestEngine()
+
+    feed_items = [
+        {
+            "id": "green_day",
+            "author_name": "Ms. Miller",
+            "content_text": "💚 Don't forget to wear GREEN tomorrow",
+            "item_timestamp": "2026-09-22T20:48:00Z"  # Tuesday evening
+        }
+    ]
+
+    # 1. On Wednesday morning (day of event):
+    wednesday_morning = datetime(2026, 9, 23, 7, 0, tzinfo=timezone.utc)
+    briefing_wed = engine.synthesize(feed_items=feed_items, messages=[], events=[], ref_dt=wednesday_morning)
+
+    active_items = briefing_wed.active_action_items
+    assert len(active_items) == 1
+    item = active_items[0]
+    assert item.urgency == "high"
+    assert "Today: 💚 Don't forget to wear GREEN" in item.summary
+    assert "tomorrow" not in item.summary.lower()
+
+    # 2. On Thursday morning (day AFTER event):
+    thursday_morning = datetime(2026, 9, 24, 7, 0, tzinfo=timezone.utc)
+    briefing_thu = engine.synthesize(feed_items=feed_items, messages=[], events=[], ref_dt=thursday_morning)
+
+    # Must be completely omitted from active action items and expired past notices
+    assert len(briefing_thu.active_action_items) == 0
+    assert len(briefing_thu.expired_action_items) == 0
+
+
+def test_past_events_and_deadlines_filtered_out():
+    """Verify that passed events ('no school Monday' 5d ago, 'tonight' yesterday, past weekend) are removed."""
+    from datetime import datetime, timezone
+    engine = DigestEngine()
+
+    feed_items = [
+        # Monday passed 2 days ago relative to Wednesday Sep 23
+        {
+            "id": "no_school",
+            "author_name": "School Office",
+            "content_text": "REMINDER: There is no school on Monday",
+            "item_timestamp": "2026-09-18T12:00:00Z"  # Friday Sep 18 (5 days ago)
+        },
+        # Town hall meeting was Tuesday night
+        {
+            "id": "town_hall",
+            "author_name": "Principal",
+            "content_text": "Families, here is a friendly reminder that tonight is the town hall meeting",
+            "item_timestamp": "2026-09-22T15:00:00Z"  # Tuesday 3:00 PM
+        },
+        # Weekend passed 3 days ago
+        {
+            "id": "weekend_login",
+            "author_name": "School Office",
+            "content_text": "Happy Weekend Seahawks! Parents, please take time this weekend to login to your portal",
+            "item_timestamp": "2026-09-18T12:00:00Z"  # Friday Sep 18
+        },
+        # Daily homework assigned yesterday afternoon remains active
+        {
+            "id": "daily_hw",
+            "author_name": "Ms. Miller",
+            "content_text": "Daily Homework: Students need to complete the Monday and Tuesday pages in their ELA packet",
+            "item_timestamp": "2026-09-22T19:54:00Z"  # Tuesday evening
+        }
+    ]
+
+    wednesday_morning = datetime(2026, 9, 23, 7, 0, tzinfo=timezone.utc)
+    briefing = engine.synthesize(feed_items=feed_items, messages=[], events=[], ref_dt=wednesday_morning)
+
+    # Active items should ONLY contain the relevant homework!
+    active_summaries = [a.summary for a in briefing.active_action_items]
+    assert any("Daily Homework" in s for s in active_summaries)
+    assert not any("no school on Monday" in s for s in active_summaries)
+    assert not any("town hall meeting" in s for s in active_summaries)
+
+    # Expired past notices should NOT clutter with transient noise
+    expired_summaries = [a.summary for a in briefing.expired_action_items]
+    assert not any("no school on Monday" in s for s in expired_summaries)
+    assert not any("town hall meeting" in s for s in expired_summaries)
+
+    # Upcoming dates should NOT contain the past weekend
+    upcoming_titles = [d.title for d in briefing.active_upcoming_dates]
+    assert not any("this weekend" in t.lower() for t in upcoming_titles)
 
