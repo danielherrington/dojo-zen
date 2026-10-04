@@ -3,7 +3,7 @@
 import re
 from datetime import datetime, timezone, date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 # Patterns indicative of ClassDojo marketing, avatar dressing, or gamification bloat
 BLOAT_PATTERNS = [
@@ -388,6 +388,54 @@ def parse_and_format_timestamp(raw_time: Optional[str]) -> Tuple[str, bool]:
         return (str(raw_time)[:10], False)
 
 
+def classify_attachment(att: Any) -> Dict[str, Any]:
+    """
+    Classifies a ClassDojo attachment into photo, video, or file.
+    Extracts displayable image URL (poster frame for video, thumbnail or image for photo, None for raw video/file).
+    """
+    if not isinstance(att, dict):
+        return {"kind": "unknown", "image_url": None, "media_url": None, "thumbnail_url": None, "filename": "Attachment"}
+
+    att_type = str(att.get("type") or "").strip().lower()
+    path = str(att.get("path") or att.get("url") or "").strip()
+    path_lower = path.lower()
+    thumb = str(att.get("thumbnailPath") or att.get("thumbnailUrl") or att.get("poster") or "").strip() or None
+
+    is_video = (
+        att_type == "video"
+        or any(ext in path_lower for ext in [".mp4", ".mov", ".webm", ".m4v"])
+    )
+    is_pdf = (
+        att_type == "file"
+        or any(ext in path_lower for ext in [".pdf", ".doc", ".docx", ".xls", ".xlsx"])
+    )
+
+    if is_video:
+        return {
+            "kind": "video",
+            "image_url": thumb,  # Valid JPEG poster frame suitable for <img> tags
+            "media_url": path if path else None,   # .mp4 stream URL for <video> player or links
+            "thumbnail_url": thumb,
+            "filename": att.get("metadata", {}).get("filename") if isinstance(att.get("metadata"), dict) else "Video",
+        }
+    elif is_pdf:
+        return {
+            "kind": "file",
+            "image_url": thumb,  # Only if a thumbnail image was generated, never the raw .pdf
+            "media_url": path if path else None,
+            "thumbnail_url": thumb,
+            "filename": att.get("metadata", {}).get("filename") if isinstance(att.get("metadata"), dict) else "Document",
+        }
+    else:
+        return {
+            "kind": "photo",
+            "image_url": path if path else None,
+            "media_url": path if path else None,
+            "thumbnail_url": thumb or (path if path else None),
+            "filename": att.get("metadata", {}).get("filename") if isinstance(att.get("metadata"), dict) else "Photo",
+        }
+
+
 class ActionItem(BaseModel):
     summary: str
     context: str
@@ -397,6 +445,7 @@ class ActionItem(BaseModel):
     is_stale: bool = False
     is_transient: bool = False
     image_urls: List[str] = Field(default_factory=list)
+    video_urls: List[str] = Field(default_factory=list)
     item_id: Optional[str] = None
 
 
@@ -407,6 +456,7 @@ class UpcomingDate(BaseModel):
     posted_at_str: Optional[str] = None
     author: Optional[str] = None
     image_urls: List[str] = Field(default_factory=list)
+    video_urls: List[str] = Field(default_factory=list)
     item_id: Optional[str] = None
     is_stale: bool = False
 
@@ -423,10 +473,29 @@ class ClassroomHighlight(BaseModel):
     author: str
     text: str
     attachment_count: int = 0
+    photo_count: int = 0
+    video_count: int = 0
+    file_count: int = 0
     image_urls: List[str] = Field(default_factory=list)
+    video_urls: List[str] = Field(default_factory=list)
+    file_urls: List[str] = Field(default_factory=list)
     date_str: Optional[str] = None
     posted_at_str: str = "Recently"
     item_id: Optional[str] = None
+
+    @computed_field
+    @property
+    def attachment_label(self) -> str:
+        parts = []
+        if self.photo_count > 0:
+            parts.append(f"📷 {self.photo_count} photo{'s' if self.photo_count > 1 else ''}")
+        if self.video_count > 0:
+            parts.append(f"🎥 {self.video_count} video{'s' if self.video_count > 1 else ''}")
+        if self.file_count > 0:
+            parts.append(f"📎 {self.file_count} file{'s' if self.file_count > 1 else ''}")
+        if not parts and self.attachment_count > 0:
+            parts.append(f"📷 {self.attachment_count} photo{'s' if self.attachment_count > 1 else ''}")
+        return ", ".join(parts)
 
 
 class Briefing(BaseModel):
@@ -593,13 +662,28 @@ class DigestEngine:
             except Exception:
                 attachments = []
 
+            photo_count = 0
+            video_count = 0
+            file_count = 0
             image_urls = []
-            if not is_already_digested:
-                image_urls = [
-                    att.get("path") or att.get("url")
-                    for att in attachments
-                    if isinstance(att, dict) and (att.get("path") or att.get("url"))
-                ]
+            video_urls = []
+            file_urls = []
+
+            for att in attachments:
+                c = classify_attachment(att)
+                if c["kind"] == "video":
+                    video_count += 1
+                    if c["media_url"]:
+                        video_urls.append(c["media_url"])
+                elif c["kind"] == "file":
+                    file_count += 1
+                    if c["media_url"]:
+                        file_urls.append(c["media_url"])
+                else:
+                    photo_count += 1
+
+                if not is_already_digested and c["image_url"]:
+                    image_urls.append(c["image_url"])
 
             # Check for dates / events in text
             if any(k in lower for k in DATE_KEYWORDS):
@@ -613,6 +697,7 @@ class DigestEngine:
                     posted_at_str=posted_str,
                     author=author,
                     image_urls=image_urls,
+                    video_urls=video_urls,
                     item_id=item_id,
                     is_stale=date_eval["is_expired"]
                 ))
@@ -630,6 +715,7 @@ class DigestEngine:
                     is_stale=eval_res["is_expired"],
                     is_transient=eval_res.get("is_transient", False),
                     image_urls=image_urls,
+                    video_urls=video_urls,
                     item_id=item_id
                 ))
             elif not is_already_digested:
@@ -638,7 +724,12 @@ class DigestEngine:
                     author=author,
                     text=content,
                     attachment_count=len(attachments),
+                    photo_count=photo_count,
+                    video_count=video_count,
+                    file_count=file_count,
                     image_urls=image_urls,
+                    video_urls=video_urls,
+                    file_urls=file_urls,
                     date_str=raw_time,
                     posted_at_str=posted_str,
                     item_id=item_id
@@ -832,7 +923,8 @@ class DigestEngine:
         if briefing.classroom_highlights:
             lines.append("🌟 CLASSROOM HIGHLIGHTS:")
             for h in briefing.classroom_highlights[:5]:
-                photo_str = f" [{h.attachment_count} photos]" if h.attachment_count > 0 else ""
+                label = h.attachment_label
+                photo_str = f" [{label}]" if label else ""
                 lines.append(f"  • {h.author} ({h.posted_at_str}): {h.text[:120]}{photo_str}")
             lines.append("")
 

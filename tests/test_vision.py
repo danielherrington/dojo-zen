@@ -179,3 +179,49 @@ def test_digest_ocr_action_item_integration():
     assert "Return money envelope by Thursday" in action_items[0].summary
     assert len(upcoming_dates) == 1
     assert "Pizza Friday" in upcoming_dates[0].title
+
+
+def test_analyze_feed_attachments_handles_videos_and_files():
+    """Ensure analyze_feed_attachments downloads video thumbnailPath instead of .mp4 stream and skips bare PDFs."""
+    item = {
+        "id": "post_media",
+        "attachments": [
+            {
+                "id": "vid_1",
+                "type": "video",
+                "path": "https://svideos.classdojo.com/movie.mp4",
+                "thumbnailPath": "https://svideos.classdojo.com/movie_poster.jpg",
+                "metadata": {"filename": "movie.mp4"}
+            },
+            {
+                "id": "pdf_1",
+                "type": "file",
+                "path": "https://sfiles.classdojo.com/handbook.pdf",
+                "metadata": {"filename": "handbook.pdf"}
+            }
+        ]
+    }
+
+    mock_download = MagicMock(return_value=b"fake_jpeg_bytes")
+    mock_ocr = {
+        "has_text": True,
+        "full_text": "SCIENCE FAIR POSTER",
+        "dates": ["Nov 1"],
+        "action_items": ["Register online"],
+        "summary": "Science Fair"
+    }
+
+    with patch("dojo.vision.download_image", mock_download) as mock_dl, \
+         patch("dojo.vision.analyze_image_bytes", return_value=mock_ocr) as mock_analyze:
+        results = analyze_feed_attachments(item, api_key="fake_key")
+
+        # Only 1 result for video thumbnail; bare PDF without thumbnail is skipped
+        assert len(results) == 1
+        assert results[0]["attachment_id"] == "vid_1"
+        assert results[0]["image_url"] == "https://svideos.classdojo.com/movie_poster.jpg"
+
+        # Verify download was called with the JPEG thumbnail, NOT the .mp4 video!
+        mock_dl.assert_called_once_with("https://svideos.classdojo.com/movie_poster.jpg", cookies=None)
+        mock_analyze.assert_called_once()
+        assert mock_analyze.call_args[1]["mime_type"] == "image/jpeg"
+

@@ -590,6 +590,67 @@
     }
     .modal-close-btn:hover { background: rgba(0,0,0,0.9); }
 
+    /* Video & File Attachments */
+    .video-thumbnail-wrap {
+      position: relative;
+      cursor: pointer;
+      display: inline-block;
+      width: 100%;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .video-thumbnail-wrap img {
+      width: 100%;
+      display: block;
+      border-radius: 8px;
+      transition: filter 0.2s ease;
+    }
+    .video-thumbnail-wrap:hover img {
+      filter: brightness(0.9);
+    }
+    .video-play-badge {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(15, 23, 42, 0.75);
+      color: #ffffff;
+      padding: 9px 16px;
+      border-radius: 30px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 13.5px;
+      font-weight: 600;
+      backdrop-filter: blur(4px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      pointer-events: none;
+      transition: transform 0.15s ease, background 0.15s ease;
+    }
+    .video-thumbnail-wrap:hover .video-play-badge {
+      background: rgba(124, 58, 237, 0.9);
+      transform: translate(-50%, -50%) scale(1.04);
+    }
+    .file-attachment-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      margin-top: 8px;
+      text-decoration: none;
+      color: #1e293b;
+      font-size: 13.5px;
+      font-weight: 500;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .file-attachment-card:hover {
+      background: #f1f5f9;
+      border-color: #cbd5e1;
+    }
+
     /* Highlight Pulse */
     .highlight-pulse {
       animation: pulseGlow 2.5s ease-out;
@@ -687,12 +748,13 @@
     </div>
   </main>
 
-  <!-- Lightbox Modal for Full Image Inspection -->
-  <div id="image-modal" class="modal-overlay" onclick="closeImageModal(event)" role="dialog" aria-modal="true" aria-label="Image preview">
+  <!-- Lightbox Modal for Full Image & Video Inspection -->
+  <div id="image-modal" class="modal-overlay" onclick="closeImageModal(event)" role="dialog" aria-modal="true" aria-label="Media preview">
     <div class="modal-box">
-      <button class="modal-close-btn" onclick="closeImageModal(event)" aria-label="Close image preview">&times;</button>
-      <div class="modal-img-wrap">
+      <button class="modal-close-btn" onclick="closeImageModal(event)" aria-label="Close media preview">&times;</button>
+      <div class="modal-img-wrap" id="modal-media-wrap">
         <img id="modal-img" src="" alt="Full resolution attachment" />
+        <video id="modal-video" controls playsinline style="max-width: 100%; max-height: calc(85vh - 54px); max-height: calc(85dvh - 54px); display: none; background: #000; width: 100%;"></video>
       </div>
       <div class="modal-footer">
         <span id="modal-caption" style="font-size: 13px; font-weight: 500; color: #334155;"></span>
@@ -897,13 +959,14 @@
         if (b.classroom_highlights && b.classroom_highlights.length > 0) {
           html += `<h3 style="color: var(--accent); margin: 22px 0 10px 0; font-size: 15px; letter-spacing: 0.02em;">🌟 RECENT CLASSROOM HIGHLIGHTS</h3>`;
           b.classroom_highlights.forEach(h => {
-            const imagesHtml = renderBriefingImages(h.image_urls, h.author);
+            const imagesHtml = renderBriefingImages(h.image_urls, h.author, h.video_urls);
+            const metaBadge = h.attachment_label ? `&bull; ${escapeHtml(h.attachment_label)}` : (h.attachment_count ? `&bull; 📷 ${h.attachment_count} photo(s)` : '');
             html += `
               <div class="card" style="border-left: 4px solid #8b5cf6; background: #f5f3ff;">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
                   <div>
                     <div class="card-title" style="color: #5b21b6;">${escapeHtml(h.author)}</div>
-                    <div class="card-meta">📅 Posted: ${escapeHtml(h.posted_at_str)} ${h.attachment_count ? `&bull; 📷 ${h.attachment_count} photo(s)` : ''}</div>
+                    <div class="card-meta">📅 Posted: ${escapeHtml(h.posted_at_str)} ${metaBadge}</div>
                   </div>
                   ${h.item_id ? `<button class="action-btn-sm" onclick="jumpToItem('${escapeHtml(h.item_id)}')">View in Feed ↗</button>` : ''}
                 </div>
@@ -945,13 +1008,25 @@
       }
     }
 
-    function renderBriefingImages(images, caption) {
-      if (!images || images.length === 0) return '';
-      const isSingle = images.length === 1;
+    function renderBriefingImages(images, caption, videoUrls) {
+      if ((!images || images.length === 0) && (!videoUrls || videoUrls.length === 0)) return '';
+      const hasVideos = videoUrls && videoUrls.length > 0;
+      const isSingle = (images || []).length === 1 && !hasVideos;
       let out = `<div class="feed-photos-grid ${isSingle ? 'single-item' : ''}">`;
-      images.forEach(img => {
-        out += `
-          <img src="${escapeHtml(img)}" class="feed-photo" loading="lazy" alt="Attachment" onclick="openLightbox('${escapeHtml(img)}', '${escapeHtml(caption || 'Attachment')}')" />`;
+      (images || []).forEach((img, idx) => {
+        if (hasVideos) {
+          const vUrl = videoUrls[idx] || videoUrls[0];
+          out += `
+            <div class="video-thumbnail-wrap" onclick="openLightbox('${escapeHtml(vUrl)}', '${escapeHtml(caption || 'Classroom Video')}', true, '${escapeHtml(img)}')">
+              <img src="${escapeHtml(img)}" class="feed-photo" loading="lazy" alt="Video thumbnail" />
+              <div class="video-play-badge">
+                <span>▶ Watch Video</span>
+              </div>
+            </div>`;
+        } else {
+          out += `
+            <img src="${escapeHtml(img)}" class="feed-photo" loading="lazy" alt="Attachment" onclick="openLightbox('${escapeHtml(img)}', '${escapeHtml(caption || 'Attachment')}', false)" />`;
+        }
       });
       out += '</div>';
       return out;
@@ -1013,10 +1088,34 @@
           const isSingle = attachments.length === 1;
           attachmentsHtml += `<div class="feed-photos-grid ${isSingle ? 'single-item' : ''}">`;
           attachments.forEach(att => {
-            const path = att.path || att.url;
-            if (path) {
+            const attType = (att.type || '').toLowerCase();
+            const path = att.path || att.url || '';
+            const pathLower = path.toLowerCase();
+            const thumb = att.thumbnailPath || att.thumbnailUrl || '';
+            const isVideo = attType === 'video' || pathLower.includes('.mp4') || pathLower.includes('.mov') || pathLower.includes('.webm') || pathLower.includes('.m4v');
+            const isPdf = attType === 'file' || pathLower.includes('.pdf') || pathLower.includes('.doc') || pathLower.includes('.docx');
+
+            if (isVideo) {
+              const displayImg = thumb || path;
+              const duration = att.metadata && att.metadata.duration ? `${Math.round(att.metadata.duration)}s` : '';
               attachmentsHtml += `
-                <img src="${escapeHtml(path)}" class="feed-photo" loading="lazy" alt="Post Attachment" onclick="openLightbox('${escapeHtml(path)}', '${escapeHtml(it.author || 'Post Attachment')}')" />`;
+                <div class="video-thumbnail-wrap" onclick="openLightbox('${escapeHtml(path)}', '${escapeHtml(it.author || 'Classroom Video')}', true, '${escapeHtml(displayImg)}')">
+                  <img src="${escapeHtml(displayImg)}" class="feed-photo" loading="lazy" alt="Video thumbnail" />
+                  <div class="video-play-badge">
+                    <span>▶ Watch Video ${duration ? `(${duration})` : ''}</span>
+                  </div>
+                </div>`;
+            } else if (isPdf) {
+              const filename = (att.metadata && att.metadata.filename) || 'Attached Document (PDF)';
+              attachmentsHtml += `
+                <a href="${escapeHtml(path)}" target="_blank" rel="noopener" class="file-attachment-card">
+                  <span style="font-size: 20px;">📄</span>
+                  <span style="flex: 1; word-break: break-all;">${escapeHtml(filename)}</span>
+                  <span style="color: var(--primary); font-size: 12px; font-weight: 600;">View PDF ↗</span>
+                </a>`;
+            } else if (path) {
+              attachmentsHtml += `
+                <img src="${escapeHtml(path)}" class="feed-photo" loading="lazy" alt="Post Attachment" onclick="openLightbox('${escapeHtml(path)}', '${escapeHtml(it.author || 'Post Attachment')}', false)" />`;
             }
           });
           attachmentsHtml += '</div>';
@@ -1086,23 +1185,49 @@
     }
 
     /* Lightbox Modal */
-    function openLightbox(imgUrl, caption) {
+    function openLightbox(mediaUrl, caption, isVideo = false, posterUrl = '') {
       const modal = document.getElementById('image-modal');
       const modalImg = document.getElementById('modal-img');
+      const modalVideo = document.getElementById('modal-video');
       const modalCap = document.getElementById('modal-caption');
       const rawLink = document.getElementById('modal-raw-link');
-      modalImg.src = imgUrl;
+
       modalCap.innerText = caption || 'Classroom Attachment';
-      rawLink.href = imgUrl;
+      rawLink.href = mediaUrl;
+
+      if (isVideo) {
+        modalImg.style.display = 'none';
+        modalImg.src = '';
+        modalVideo.style.display = 'block';
+        modalVideo.src = mediaUrl;
+        if (posterUrl) modalVideo.poster = posterUrl;
+        modalVideo.load();
+        rawLink.innerText = 'Download / Open Video ↗';
+      } else {
+        if (modalVideo) {
+          modalVideo.pause();
+          modalVideo.src = '';
+          modalVideo.style.display = 'none';
+        }
+        modalImg.style.display = 'block';
+        modalImg.src = mediaUrl;
+        rawLink.innerText = 'Open Full Original ↗';
+      }
+
       modal.classList.add('open');
       document.body.style.overflow = 'hidden';
     }
 
     function closeImageModal(e) {
-      if (e && e.target && (e.target.id === 'modal-img' || e.target.id === 'modal-raw-link')) {
+      if (e && e.target && (e.target.id === 'modal-img' || e.target.id === 'modal-video' || e.target.id === 'modal-raw-link')) {
         return;
       }
       const modal = document.getElementById('image-modal');
+      const modalVideo = document.getElementById('modal-video');
+      if (modalVideo) {
+        modalVideo.pause();
+        modalVideo.src = '';
+      }
       modal.classList.remove('open');
       document.body.style.overflow = '';
     }

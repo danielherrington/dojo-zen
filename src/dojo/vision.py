@@ -169,16 +169,34 @@ def analyze_feed_attachments(
         if not path:
             continue
 
-        img_bytes = download_image(path, cookies=cookies)
+        att_type = str(att.get("type") or "").strip().lower()
+        path_lower = path.lower()
+        thumb = att.get("thumbnailPath") or att.get("thumbnailUrl")
+        is_video = att_type == "video" or any(ext in path_lower for ext in [".mp4", ".mov", ".webm", ".m4v"])
+        is_pdf = att_type == "file" or any(ext in path_lower for ext in [".pdf", ".doc", ".docx"])
+
+        # For video attachments, use the JPEG thumbnail poster for OCR analysis.
+        # Skip video if there is no poster frame to avoid downloading video streams.
+        target_url = thumb if is_video else path
+        if not target_url:
+            continue
+
+        if is_pdf:
+            # Skip non-image document files unless a thumbnail image is present
+            if not thumb:
+                continue
+            target_url = thumb
+
+        img_bytes = download_image(target_url, cookies=cookies)
         if not img_bytes:
             continue
 
         # Detect mime type from filename or header
-        fn = att.get("metadata", {}).get("filename", "")
-        mime = "image/png" if fn.endswith(".png") else "image/jpeg"
+        fn = (att.get("metadata", {}).get("filename", "") if isinstance(att.get("metadata"), dict) else "") or target_url
+        mime = "image/png" if fn.lower().endswith(".png") else "image/jpeg"
         ocr_res = analyze_image_bytes(img_bytes, mime_type=mime, api_key=api_key)
         ocr_res["attachment_id"] = att.get("_id") or att.get("id")
-        ocr_res["image_url"] = path
+        ocr_res["image_url"] = target_url
         results.append(ocr_res)
 
     return results

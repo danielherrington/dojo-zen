@@ -256,3 +256,77 @@ def test_past_events_and_deadlines_filtered_out():
     upcoming_titles = [d.title for d in briefing.active_upcoming_dates]
     assert not any("this weekend" in t.lower() for t in upcoming_titles)
 
+
+def test_video_and_file_attachments_synthesis():
+    """Ensure videos use thumbnailPath for image_urls and are labeled as videos rather than broken photos."""
+    engine = DigestEngine()
+
+    feed_items = [
+        # 1. Video attachment (like Ms. Fuentes puppy post)
+        {
+            "id": "puppy_video",
+            "author_name": "Ms. Fuentes",
+            "content_text": "As we enter spooky season, enjoy this puppy pal video!",
+            "item_timestamp": "2026-10-03T17:39:00Z",
+            "attachments": [
+                {
+                    "type": "video",
+                    "path": "https://svideos.classdojo.com/123/puppy.mp4?token=abc",
+                    "thumbnailPath": "https://svideos.classdojo.com/123/puppy_poster.jpg?token=abc",
+                    "metadata": {"duration": 14.5, "filename": "puppy.mp4"}
+                }
+            ]
+        },
+        # 2. Mixed attachments: photo, video, and PDF file
+        {
+            "id": "mixed_post",
+            "author_name": "Mr. Davis",
+            "content_text": "Here is our weekly science roundup with photos, experiment video, and flyer.",
+            "item_timestamp": "2026-10-03T18:00:00Z",
+            "attachments": [
+                {
+                    "type": "photo",
+                    "path": "https://sphotos.classdojo.com/photo1.jpg"
+                },
+                {
+                    "type": "video",
+                    "path": "https://svideos.classdojo.com/volcano.mp4",
+                    "thumbnailPath": "https://svideos.classdojo.com/volcano_thumb.jpg"
+                },
+                {
+                    "type": "file",
+                    "path": "https://sfiles.classdojo.com/lab_guide.pdf",
+                    "metadata": {"filename": "lab_guide.pdf"}
+                }
+            ]
+        }
+    ]
+
+    briefing = engine.synthesize(feed_items=feed_items, messages=[], events=[])
+    assert len(briefing.classroom_highlights) == 2
+
+    # Check puppy video post
+    puppy_hl = next(h for h in briefing.classroom_highlights if h.author == "Ms. Fuentes")
+    assert puppy_hl.video_count == 1
+    assert puppy_hl.photo_count == 0
+    assert puppy_hl.attachment_label == "🎥 1 video"
+    # Crucial: image_urls must be the valid JPEG thumbnail, NEVER the .mp4 URL!
+    assert puppy_hl.image_urls == ["https://svideos.classdojo.com/123/puppy_poster.jpg?token=abc"]
+    assert puppy_hl.video_urls == ["https://svideos.classdojo.com/123/puppy_mp4" if False else "https://svideos.classdojo.com/123/puppy.mp4?token=abc"]
+
+    # Check mixed post
+    mixed_hl = next(h for h in briefing.classroom_highlights if h.author == "Mr. Davis")
+    assert mixed_hl.photo_count == 1
+    assert mixed_hl.video_count == 1
+    assert mixed_hl.file_count == 1
+    assert "📷 1 photo" in mixed_hl.attachment_label
+    assert "🎥 1 video" in mixed_hl.attachment_label
+    assert "📎 1 file" in mixed_hl.attachment_label
+    # PDF should NOT be in image_urls; only photo and video thumbnail
+    assert "https://sphotos.classdojo.com/photo1.jpg" in mixed_hl.image_urls
+    assert "https://svideos.classdojo.com/volcano_thumb.jpg" in mixed_hl.image_urls
+    assert not any(".pdf" in u for u in mixed_hl.image_urls)
+    assert mixed_hl.video_urls == ["https://svideos.classdojo.com/volcano.mp4"]
+    assert mixed_hl.file_urls == ["https://sfiles.classdojo.com/lab_guide.pdf"]
+
+

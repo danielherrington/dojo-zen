@@ -273,7 +273,9 @@
                 <p class="item-body">{{ h.text }}</p>
                 <div class="item-meta">
                   📅 Posted: {{ h.posted_at_str }}
-                  {% if h.attachment_count > 0 %}
+                  {% if h.attachment_label %}
+                    &bull; {{ h.attachment_label }}
+                  {% elif h.attachment_count > 0 %}
                     &bull; 📷 {{ h.attachment_count }} photo{% if h.attachment_count > 1 %}s{% endif %}
                   {% endif %}
                   {% if h.item_id %}
@@ -284,9 +286,20 @@
                   <div style="margin-top: 10px;">
                     {% for img in h.image_urls %}
                       <a href="{% if h.item_id %}{{ app_base_url }}/?item={{ h.item_id }}#item-{{ h.item_id }}{% else %}{{ img }}{% endif %}" target="_blank" style="display: block; margin-top: 8px; text-decoration: none;">
-                        <img src="{{ img }}" alt="Classroom Photo" style="max-width: 100%; height: auto; border-radius: 8px; display: block; border: 1px solid #cbd5e1;" />
+                        <img src="{{ img }}" alt="Classroom Attachment" style="max-width: 100%; height: auto; border-radius: 8px; display: block; border: 1px solid #cbd5e1;" />
+                        {% if h.video_count > 0 %}
+                          <div style="margin-top: 6px; font-size: 13px; font-weight: 600; color: #7c3aed;">
+                            ▶ Watch Video on DojoZen ↗
+                          </div>
+                        {% endif %}
                       </a>
                     {% endfor %}
+                  </div>
+                {% elif h.video_count > 0 and h.item_id %}
+                  <div style="margin-top: 10px;">
+                    <a href="{{ app_base_url }}/?item={{ h.item_id }}#item-{{ h.item_id }}" target="_blank" style="display: inline-block; background: #ede9fe; color: #7c3aed; font-weight: 600; font-size: 13px; padding: 8px 14px; border-radius: 6px; text-decoration: none; border: 1px solid #ddd6fe;">
+                      🎥 Watch Video on DojoZen ↗
+                    </a>
                   </div>
                 {% endif %}
               </div>
