@@ -97,7 +97,7 @@ async def get_feed(limit: int = 40):
 
         # Parse attachments
         attachments = []
-        raw_att = r.get("attachments_json")
+        raw_att = r.get("attachments") or r.get("attachments_json")
         if raw_att:
             try:
                 attachments = json.loads(raw_att) if isinstance(raw_att, str) else raw_att
@@ -106,7 +106,7 @@ async def get_feed(limit: int = 40):
 
         # Parse OCR data
         ocr_data = None
-        raw_ocr = r.get("ocr_json") or r.get("ocr_data")
+        raw_ocr = r.get("ocr_data") or r.get("ocr_json")
         if raw_ocr:
             try:
                 ocr_data = json.loads(raw_ocr) if isinstance(raw_ocr, str) else raw_ocr
