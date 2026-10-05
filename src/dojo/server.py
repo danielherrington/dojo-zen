@@ -1,5 +1,4 @@
-"""FastAPI web server for the Dojo Zen Web Portal & Q&A Assistant."""
-
+import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -136,7 +135,7 @@ async def get_single_feed_item(item_id: str):
     posted_str, _ = parse_and_format_timestamp(item.get("item_timestamp"))
 
     attachments = []
-    raw_att = item.get("attachments_json")
+    raw_att = item.get("attachments") or item.get("attachments_json")
     if raw_att:
         try:
             attachments = json.loads(raw_att) if isinstance(raw_att, str) else raw_att
@@ -144,21 +143,22 @@ async def get_single_feed_item(item_id: str):
             attachments = []
 
     ocr_data = None
-    raw_ocr = item.get("ocr_json") or item.get("ocr_data")
+    raw_ocr = item.get("ocr_data") or item.get("ocr_json")
     if raw_ocr:
         try:
             ocr_data = json.loads(raw_ocr) if isinstance(raw_ocr, str) else raw_ocr
         except Exception:
             ocr_data = None
 
+    item_id_str = item.get("id") or item_id
     return {
-        "id": item["id"],
+        "id": item_id_str,
         "author": item.get("author_name") or "School",
         "header": item.get("header"),
         "text": (item.get("content_text") or item.get("header") or "").strip(),
         "posted_at_str": posted_str,
         "raw_time": item.get("item_timestamp"),
-        "classdojo_url": f"https://home.classdojo.com/#/story/{item['id']}",
+        "classdojo_url": f"https://home.classdojo.com/#/story/{item_id_str}",
         "attachments": attachments,
         "ocr_data": ocr_data,
     }
