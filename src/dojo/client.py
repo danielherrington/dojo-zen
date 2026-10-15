@@ -3,7 +3,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -170,7 +170,45 @@ class DojoClient:
         """Fetch current user profile, children, and enrolled classrooms."""
         resp = self.client.get(LOGIN_URL)
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+
+        # ClassDojo stores students under /api/parent/{parentId}/student
+        if "children" not in data or not data["children"]:
+            parent = data.get("parent") or {}
+            parent_id = parent.get("_id")
+            if parent_id:
+                try:
+                    s_resp = self.client.get(f"{BASE_URL}/api/parent/{parent_id}/student")
+                    if s_resp.status_code == 200:
+                        students = s_resp.json().get("_items", [])
+                        data["children"] = students
+                        classes = []
+                        for s in students:
+                            for cl in s.get("classes", []):
+                                classes.append(cl)
+                        data["classes"] = classes
+                except Exception as e:
+                    logger.debug(f"Could not populate students into session info: {e}")
+        return data
+
+    def get_students(self) -> List[Dict[str, Any]]:
+        """Fetch enrolled children and their classes for the parent."""
+        try:
+            session = self.get_session_info()
+            parent = session.get("parent") or {}
+            parent_id = parent.get("_id")
+            if not parent_id:
+                return []
+            url = f"{BASE_URL}/api/parent/{parent_id}/student"
+            resp = self.client.get(url)
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("_items") or []
+        except Exception as e:
+            logger.warning(f"Failed to fetch students from ClassDojo: {e}")
+        return []
+
+
 
     def get_story_feed(self, limit: int = 50) -> List[Dict[str, Any]]:
         """
@@ -237,3 +275,35 @@ class DojoClient:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
+
+def sync_roster(client: DojoClient, db: Any) -> Tuple[int, int]:
+    """Sync children and classrooms from ClassDojo into the database.
+
+    Returns: (children_count, classes_count)
+    """
+    students = client.get_students()
+    ch_count = 0
+    cl_count = 0
+    for s in students:
+        ch_id = str(s.get("_id") or s.get("id"))
+        first = s.get("firstName", "")
+        last = s.get("lastName", "")
+        name = f"{first} {last}".strip() or s.get("name") or "Child"
+        grade = "Kindergarten" if s.get("year") == 0 else str(s.get("year", ""))
+        avatar_url = s.get("avatar")
+        db.upsert_child(ch_id, name, grade=grade, avatar_url=avatar_url)
+        ch_count += 1
+
+        for cl in s.get("classes", []):
+            cl_id = str(cl.get("_id") or cl.get("id"))
+            cl_name = cl.get("name", "Class")
+            t = cl.get("teacher", {})
+            t_title = t.get("title", "")
+            t_last = t.get("lastName", "")
+            t_first = t.get("firstName", "")
+            t_name = f"{t_title} {t_last}".strip() if (t_title or t_last) else f"{t_first} {t_last}".strip() or t.get("name")
+            db.upsert_class(cl_id, cl_name, teacher_name=t_name, child_id=ch_id)
+            cl_count += 1
+    return ch_count, cl_count
+

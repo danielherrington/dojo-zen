@@ -89,18 +89,8 @@ def cmd_sync(args: argparse.Namespace) -> None:
         try:
             # 1. Update session & enrolled students / classes
             try:
-                session_info = client.get_session_info()
-                children = session_info.get("children") or []
-                for ch in children:
-                    ch_id = str(ch.get("id") or ch.get("_id"))
-                    ch_name = ch.get("name") or "Child"
-                    db.upsert_child(ch_id, ch_name)
-
-                classes = session_info.get("classes") or []
-                for cl in classes:
-                    cl_id = str(cl.get("id") or cl.get("_id"))
-                    cl_name = cl.get("name") or "Class"
-                    db.upsert_class(cl_id, cl_name)
+                from dojo.client import sync_roster
+                sync_roster(client, db)
             except Exception as e:
                 console.print(f"[dim yellow]Warning fetching session info: {e}[/dim yellow]")
 

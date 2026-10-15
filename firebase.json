@@ -5,6 +5,20 @@
       "public": "src/dojo/web",
       "rewrites": [
         {
+          "source": "/mcp",
+          "run": {
+            "serviceId": "dojo-zen",
+            "region": "us-central1"
+          }
+        },
+        {
+          "source": "/mcp/**",
+          "run": {
+            "serviceId": "dojo-zen",
+            "region": "us-central1"
+          }
+        },
+        {
           "source": "**",
           "run": {
             "serviceId": "dojo-zen",

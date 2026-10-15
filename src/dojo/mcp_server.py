@@ -23,7 +23,19 @@ mcp = MCPServer(
 )
 
 
+_db_instance: Optional[Any] = None
+
+
+def set_database(db: Any) -> None:
+    """Explicitly inject a database instance (e.g. from FastAPI server)."""
+    global _db_instance
+    _db_instance = db
+
+
 def _get_db():
+    global _db_instance
+    if _db_instance is not None:
+        return _db_instance
     settings.ensure_directories()
     return get_database()
 

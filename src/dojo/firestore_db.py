@@ -407,6 +407,7 @@ class FirestoreDojoDatabase:
         messages = self.get_all_messages()
         events = self.get_all_events()
         children = self.get_all_children()
+        classes = self.get_all_classes()
 
         feed_undigested = sum(1 for f in feed_items if not f.get("digested_at"))
         msg_undigested = sum(1 for m in messages if not m.get("digested_at"))
@@ -416,7 +417,7 @@ class FirestoreDojoDatabase:
 
         return {
             "children_count": len(children),
-            "classes_count": 0,
+            "classes_count": len(classes),
             "feed_total": len(feed_items),
             "undigested_items": feed_undigested + msg_undigested + events_undigested,
             "undigested_feeds": feed_undigested,

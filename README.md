@@ -100,7 +100,7 @@ Tracked in Linear Project: [**ClassDojo Anti-Bloat Agent**](https://linear.app/h
 - [x] **[DAN-31]** Anti-Bloat Daily Digest & Email Dispatcher
 - [x] **[DAN-32]** Real-Time Message Monitor & Intelligent Urgency Alerting
 - [x] **[DAN-33]** Web Portal & Natural Language Q&A Assistant for ClassDojo (Mobile-Friendly)
-- [ ] **[DAN-34]** Model Context Protocol (MCP) Server for ClassDojo
+- [x] **[DAN-34]** Model Context Protocol (MCP) Server for ClassDojo (Remote Streamable HTTP `/mcp` & Local Stdio)
 
 ---
 

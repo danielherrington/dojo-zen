@@ -1,25 +1,55 @@
 import json
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, Form, Header, HTTPException, Query, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.routing import Route
+from mcp.server.transport_security import TransportSecuritySettings
 
 from dojo.config import settings
 from dojo.db import get_database
-from dojo.client import DojoClient
+from dojo.client import DojoClient, sync_roster
 from dojo.digest import DigestEngine, parse_and_format_timestamp
 from dojo.qa import DojoQA, QAResult
+from dojo.mcp_server import mcp as mcp_server, set_database
 
 logger = logging.getLogger(__name__)
-
-app = FastAPI(title="Dojo Zen Web Portal", description="Classroom Assistant for Daniel & Family")
 
 db = get_database()
 qa_engine = DojoQA(db, gemini_api_key=settings.gemini_api_key)
 digest_engine = DigestEngine(gemini_api_key=settings.gemini_api_key)
+
+# Inject database so MCP server uses the exact same database backend (Firestore in prod, SQLite locally)
+set_database(db)
+
+# Create streamable HTTP app for MCP server
+mcp_subapp = mcp_server.streamable_http_app(
+    streamable_http_path="/",
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager that starts the MCP Streamable HTTP session manager."""
+    async with mcp_server._lowlevel_server._session_manager.run():
+        yield
+
+
+app = FastAPI(
+    title="Dojo Zen Web Portal",
+    description="Classroom Assistant for Daniel & Family",
+    lifespan=lifespan,
+)
+
+# Route /mcp directly to avoid redirect and mount sub-app for /mcp/*
+if mcp_subapp.routes:
+    app.routes.append(Route("/mcp", endpoint=mcp_subapp.routes[0].endpoint))
+app.mount("/mcp", mcp_subapp)
 
 WEB_DIR = Path(__file__).parent / "web"
 
@@ -189,6 +219,7 @@ async def sync_now():
         raise HTTPException(status_code=401, detail="No active ClassDojo session. Please refresh your session.")
 
     try:
+        sync_roster(client, db)
         feed_items = client.get_story_feed(limit=50)
         new_feed, upd_feed = db.upsert_feed_items(feed_items)
 
@@ -292,6 +323,7 @@ async def cron_daily_digest(
         client = DojoClient(session_file=settings.dojo_session_file)
         if client.is_authenticated():
             try:
+                sync_roster(client, db)
                 feed = client.get_story_feed(limit=50)
                 db.upsert_feed_items(feed)
                 db.upsert_messages(client.get_messages())

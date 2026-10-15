@@ -150,3 +150,44 @@ def test_mcp_resources_and_prompts(mock_populated_db):
 
     p_urgent = prompt_urgent_check()
     assert "urgent" in p_urgent.lower()
+
+
+@pytest.mark.anyio
+async def test_mcp_client_over_http(mock_populated_db):
+    """Test that an external MCP client can connect to /mcp over HTTP using streamable HTTP
+    transport and execute get_recent_feed and get_daily_briefing.
+    """
+    from httpx import ASGITransport, AsyncClient
+    from mcp.client.streamable_http import streamable_http_client
+    from mcp import ClientSession
+    from dojo.server import app, lifespan
+    from dojo.mcp_server import set_database
+
+    set_database(mock_populated_db)
+
+    async with lifespan(app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http_client:
+            async with streamable_http_client("http://test/mcp", http_client=http_client) as (read_stream, write_stream):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+
+                    # Verify tools list
+                    tools_list = await session.list_tools()
+                    tool_names = [t.name for t in tools_list.tools]
+                    assert "get_recent_feed" in tool_names
+                    assert "get_daily_briefing" in tool_names
+
+                    # 1. Call get_recent_feed tool
+                    feed_result = await session.call_tool("get_recent_feed", {"limit": 5})
+                    assert feed_result.content
+                    assert not feed_result.is_error
+                    all_feed_text = "\n".join(c.text for c in feed_result.content)
+                    assert "post-1" in all_feed_text or "post-2" in all_feed_text
+
+                    # 2. Call get_daily_briefing tool
+                    briefing_result = await session.call_tool("get_daily_briefing", {"force": True})
+                    assert briefing_result.content
+                    assert not briefing_result.is_error
+                    briefing_text = briefing_result.content[0].text
+                    assert "DOJOZEN DAILY BRIEFING" in briefing_text
+
