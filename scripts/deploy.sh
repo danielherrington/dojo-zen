@@ -35,6 +35,13 @@ gcloud run deploy "$SERVICE_NAME" \
 SERVICE_URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --project "$PROJECT_ID" --format 'value(status.url)')
 echo "✓ Cloud Run Service URL: $SERVICE_URL"
 
+# Ensure Cloudflare DNS record exists
+if [ -f "$HOME/.cloudflare/token" ] || [ -n "$CLOUDFLARE_API_TOKEN" ]; then
+  echo ""
+  echo "🌐 Ensuring Cloudflare DNS record for dojo.herrington.ai..."
+  python3 scripts/cloudflare_dns.py upsert dojo ghs.googlehosted.com --comment "ClassDojo DojoZen on Cloud Run" || true
+fi
+
 # 3. Deploy Firebase Hosting target
 echo ""
 echo "🌐 Step 3: Deploying Firebase Hosting site '$SITE_ID'..."
