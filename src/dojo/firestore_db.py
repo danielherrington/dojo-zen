@@ -120,6 +120,8 @@ class FirestoreDojoDatabase:
 
             content_text = item.get("content_text") or item.get("contents", {}).get("body") or ""
             header = item.get("header") or item.get("contents", {}).get("title") or ""
+            if item.get("pinnedAt") and not header.startswith("📌"):
+                header = f"📌 Pinned: {header}".strip(": ")
 
             sender_name = (
                 item.get("senderName")
@@ -133,6 +135,8 @@ class FirestoreDojoDatabase:
                 author = f"{sender_name} ({subtext})"
             else:
                 author = sender_name or subtext or ""
+            if item.get("pinnedAt") and "📌" not in author:
+                author = f"📌 {author} (Pinned)"
 
             item_time = item.get("item_timestamp") or item.get("time") or item.get("createdAt")
 
@@ -146,6 +150,7 @@ class FirestoreDojoDatabase:
                 "content_text": content_text,
                 "attachments_json": attachments_str,
                 "item_timestamp": item_time,
+                "pinned_at": item.get("pinnedAt") or item.get("pinned_at"),
             }
 
             if doc.exists:
@@ -174,17 +179,32 @@ class FirestoreDojoDatabase:
             doc = doc_ref.get()
 
             body = msg.get("body") or msg.get("text") or ""
-            sender_name = msg.get("sender_name") or msg.get("sender", {}).get("name") or ""
-            sender_id = msg.get("sender_id") or msg.get("sender", {}).get("id") or ""
+            sender_obj = msg.get("sender") or {}
+            sender_name = (
+                msg.get("sender_name")
+                or sender_obj.get("formattedName")
+                or sender_obj.get("name")
+                or ""
+            )
+            sender_id = (
+                msg.get("sender_id")
+                or sender_obj.get("_id")
+                or sender_obj.get("id")
+                or ""
+            )
+            conv_id = msg.get("conversation_id") or msg.get("messageThreadId")
             time_val = msg.get("message_timestamp") or msg.get("time") or msg.get("createdAt")
 
             data = {
                 "id": msg_id,
-                "conversation_id": msg.get("conversation_id"),
+                "conversation_id": conv_id,
                 "sender_id": sender_id,
                 "sender_name": sender_name,
                 "body": body,
                 "message_timestamp": time_val,
+                "thread_name": msg.get("thread_name"),
+                "thread_type": msg.get("thread_type"),
+                "attachments": msg.get("attachments") or [],
             }
 
             if doc.exists:
@@ -212,15 +232,18 @@ class FirestoreDojoDatabase:
             doc_ref = self.event_col.document(ev_id)
             doc = doc_ref.get()
 
-            title = ev.get("title") or ev.get("name") or "School Event"
-            desc = ev.get("description") or ""
-            start_time = ev.get("start_time") or ev.get("startsAt") or ev.get("date")
-            end_time = ev.get("end_time") or ev.get("endsAt")
-            loc = ev.get("location") or ""
+            contents = ev.get("contents") or {}
+            target = ev.get("target") or {}
+            title = ev.get("title") or ev.get("name") or contents.get("title") or "School Event"
+            desc = ev.get("description") or contents.get("description") or ""
+            start_time = ev.get("start_time") or ev.get("start") or ev.get("startsAt") or ev.get("date")
+            end_time = ev.get("end_time") or ev.get("end") or ev.get("endsAt")
+            loc = ev.get("location") or target.get("name") or ""
+            class_id = ev.get("class_id") or target.get("_id")
 
             data = {
                 "id": ev_id,
-                "class_id": ev.get("class_id"),
+                "class_id": class_id,
                 "title": title,
                 "description": desc,
                 "start_time": start_time,

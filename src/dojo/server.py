@@ -115,7 +115,7 @@ async def get_briefing():
 
 @app.get("/api/feed")
 async def get_feed(limit: int = 40):
-    """Retrieve classroom feed with formatted local timestamps, authors, attachments, and OCR transcripts."""
+    """Retrieve classroom feed (including Class Updates & teacher messages) with formatted local timestamps, authors, attachments, and OCR transcripts."""
     items = []
     rows = db.get_all_feed_items(limit=limit)
     for r in rows:
@@ -153,14 +153,58 @@ async def get_feed(limit: int = 40):
             "attachments": attachments,
             "ocr_data": ocr_data,
         })
-    return {"items": items}
+
+    # Include Class Updates & teacher messages in the unified feed
+    msg_rows = db.get_all_messages(limit=limit) if hasattr(db, "get_all_messages") else []
+    for m in msg_rows:
+        body = (m.get("body") or "").strip()
+        if not body:
+            continue
+        posted_str, _ = parse_and_format_timestamp(m.get("message_timestamp"))
+        attachments = []
+        raw_att = m.get("attachments")
+        if raw_att:
+            try:
+                attachments = json.loads(raw_att) if isinstance(raw_att, str) else raw_att
+            except Exception:
+                attachments = []
+        items.append({
+            "id": m["id"],
+            "author": m.get("sender_name") or "Teacher (Class Updates)",
+            "header": "Class Update / Message",
+            "text": body,
+            "posted_at_str": posted_str,
+            "raw_time": m.get("message_timestamp"),
+            "classdojo_url": "https://home.classdojo.com/#/messages",
+            "attachments": attachments,
+            "ocr_data": None,
+        })
+
+    items.sort(key=lambda x: x.get("raw_time") or "", reverse=True)
+    return {"items": items[:limit]}
 
 
 @app.get("/api/feed/{item_id}")
 async def get_single_feed_item(item_id: str):
-    """Retrieve a single post by ID for deep linking."""
+    """Retrieve a single post or message by ID for deep linking."""
     item = db.get_feed_item(item_id) if hasattr(db, "get_feed_item") else None
     if not item:
+        # Check if it's a message / Class Update
+        if hasattr(db, "get_all_messages"):
+            for m in db.get_all_messages():
+                if str(m.get("id")) == str(item_id):
+                    posted_str, _ = parse_and_format_timestamp(m.get("message_timestamp"))
+                    return {
+                        "id": str(m.get("id")),
+                        "author": m.get("sender_name") or "Teacher",
+                        "header": "Class Update / Message",
+                        "text": (m.get("body") or "").strip(),
+                        "posted_at_str": posted_str,
+                        "raw_time": m.get("message_timestamp"),
+                        "classdojo_url": "https://home.classdojo.com/#/messages",
+                        "attachments": m.get("attachments") or [],
+                        "ocr_data": None,
+                    }
         raise HTTPException(status_code=404, detail="Feed item not found")
     posted_str, _ = parse_and_format_timestamp(item.get("item_timestamp"))
 

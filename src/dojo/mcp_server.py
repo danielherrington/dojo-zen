@@ -63,6 +63,7 @@ def get_daily_briefing(force: bool = False) -> str:
         # Fallback to recent 20 items so the briefing is always informative
         recent = db.get_all_feed_items(limit=20)
         feed_items = recent
+        messages = db.get_all_messages(limit=20) if hasattr(db, "get_all_messages") else []
 
     children = db.get_all_children() if hasattr(db, "get_all_children") else []
     engine = DigestEngine(gemini_api_key=settings.gemini_api_key)
@@ -78,12 +79,13 @@ def get_daily_briefing(force: bool = False) -> str:
 @mcp.tool()
 def get_action_items() -> List[Dict[str, Any]]:
     """Get all extracted action items (supplies to bring, homework packets, clothing requirements,
-    permission slips) from recent teacher posts, ranked by urgency.
+    permission slips) from recent teacher posts and Class Updates, ranked by urgency.
     """
     db = _get_db()
     recent = db.get_all_feed_items(limit=50)
+    messages = db.get_all_messages(limit=30) if hasattr(db, "get_all_messages") else []
     engine = DigestEngine(gemini_api_key=settings.gemini_api_key)
-    briefing = engine.synthesize(feed_items=recent, messages=[], events=[], children=[])
+    briefing = engine.synthesize(feed_items=recent, messages=messages, events=[], children=[])
 
     return [
         {
@@ -101,13 +103,14 @@ def get_action_items() -> List[Dict[str, Any]]:
 @mcp.tool()
 def get_upcoming_dates() -> List[Dict[str, Any]]:
     """List upcoming school events, early dismissals, holidays, field trips, and deadlines
-    from the school calendar and teacher announcements.
+    from the school calendar, Class Updates, and teacher announcements.
     """
     db = _get_db()
     recent = db.get_all_feed_items(limit=50)
+    messages = db.get_all_messages(limit=30) if hasattr(db, "get_all_messages") else []
     events = db.get_all_events() if hasattr(db, "get_all_events") else []
     engine = DigestEngine(gemini_api_key=settings.gemini_api_key)
-    briefing = engine.synthesize(feed_items=recent, messages=[], events=events, children=[])
+    briefing = engine.synthesize(feed_items=recent, messages=messages, events=events, children=[])
 
     return [
         {
@@ -143,16 +146,33 @@ def ask_classroom_assistant(question: str) -> Dict[str, Any]:
 
 @mcp.tool()
 def search_feed(query: str, limit: int = 10) -> List[Dict[str, Any]]:
-    """Search classroom announcements and stories by keyword, topic, or teacher name.
+    """Search classroom announcements, Class Updates, and stories by keyword, topic, or teacher name.
 
     Args:
-        query: Search term (e.g., 'homework', 'sneakers', 'Alonso', 'Heritage').
+        query: Search term (e.g., 'homework', 'sneakers', 'Alonso', 'Heritage', 'test').
         limit: Maximum number of results to return (default: 10).
     """
     db = _get_db()
     clean_q = query.strip().lower()
     raw_items = db.get_all_feed_items(limit=100)
+    msg_items = db.get_all_messages(limit=100) if hasattr(db, "get_all_messages") else []
     matches = []
+
+    for m in msg_items:
+        text = m.get("body") or ""
+        author = m.get("sender_name", "Teacher")
+        if is_bloat(text):
+            continue
+        if clean_q in text.lower() or clean_q in author.lower() or clean_q in "class updates":
+            time_str, _ = parse_and_format_timestamp(m.get("message_timestamp"))
+            matches.append({
+                "id": m["id"],
+                "author": author,
+                "posted_at": time_str,
+                "raw_time": m.get("message_timestamp") or "",
+                "text": text[:300] + ("..." if len(text) > 300 else ""),
+                "classdojo_url": "https://home.classdojo.com/#/messages",
+            })
 
     for item in raw_items:
         text = item.get("content_text") or item.get("body_text") or ""
@@ -167,18 +187,20 @@ def search_feed(query: str, limit: int = 10) -> List[Dict[str, Any]]:
                 "id": item["id"],
                 "author": author,
                 "posted_at": time_str,
+                "raw_time": item.get("item_timestamp") or "",
                 "text": text[:300] + ("..." if len(text) > 300 else ""),
                 "classdojo_url": f"https://home.classdojo.com/#/story/{item['id']}",
             })
-            if len(matches) >= limit:
-                break
 
-    return matches
+    matches.sort(key=lambda x: x.get("raw_time") or "", reverse=True)
+    for m in matches:
+        m.pop("raw_time", None)
+    return matches[:limit]
 
 
 @mcp.tool()
 def get_recent_feed(limit: int = 15) -> List[Dict[str, Any]]:
-    """Get the most recent classroom announcements from ClassDojo with author, timestamp, content,
+    """Get the most recent classroom announcements and Class Updates from ClassDojo with author, timestamp, content,
     and direct deep links (filtering out noisy marketing/bloat).
 
     Args:
@@ -186,31 +208,52 @@ def get_recent_feed(limit: int = 15) -> List[Dict[str, Any]]:
     """
     db = _get_db()
     raw_items = db.get_all_feed_items(limit=limit * 2)
-    clean_items = []
+    msg_items = db.get_all_messages(limit=limit * 2) if hasattr(db, "get_all_messages") else []
+    combined = []
 
     for item in raw_items:
         text = item.get("content_text") or item.get("body_text") or ""
-        if is_bloat(text):
+        if not text or is_bloat(text):
             continue
 
         time_str, _ = parse_and_format_timestamp(item.get("item_timestamp"))
-        clean_items.append({
+        combined.append({
             "id": item["id"],
             "author": item.get("author_name", "Teacher"),
             "posted_at": time_str,
+            "raw_time": item.get("item_timestamp") or "",
             "text": text,
             "classdojo_url": f"https://home.classdojo.com/#/story/{item['id']}",
-            "web_portal_url": f"https://herrington-dojo.web.app/?item={item['id']}",
+            "web_portal_url": f"https://dojo.herrington.ai/?item={item['id']}",
         })
-        if len(clean_items) >= limit:
-            break
+
+    for m in msg_items:
+        text = m.get("body") or ""
+        if not text or is_bloat(text):
+            continue
+
+        time_str, _ = parse_and_format_timestamp(m.get("message_timestamp"))
+        combined.append({
+            "id": m["id"],
+            "author": m.get("sender_name", "Teacher (Class Updates)"),
+            "posted_at": time_str,
+            "raw_time": m.get("message_timestamp") or "",
+            "text": text,
+            "classdojo_url": "https://home.classdojo.com/#/messages",
+            "web_portal_url": f"https://dojo.herrington.ai/?item={m['id']}",
+        })
+
+    combined.sort(key=lambda x: x.get("raw_time") or "", reverse=True)
+    clean_items = combined[:limit]
+    for it in clean_items:
+        it.pop("raw_time", None)
 
     return clean_items
 
 
 @mcp.tool()
 def get_feed_item(item_id: str) -> Optional[Dict[str, Any]]:
-    """Get the full details of a specific ClassDojo feed announcement by its unique ID.
+    """Get the full details of a specific ClassDojo feed announcement or Class Update by its unique ID.
 
     Args:
         item_id: The ClassDojo item identifier.
@@ -218,6 +261,19 @@ def get_feed_item(item_id: str) -> Optional[Dict[str, Any]]:
     db = _get_db()
     item = db.get_feed_item(item_id) if hasattr(db, "get_feed_item") else None
     if not item:
+        if hasattr(db, "get_all_messages"):
+            for m in db.get_all_messages():
+                if str(m.get("id")) == str(item_id):
+                    time_str, _ = parse_and_format_timestamp(m.get("message_timestamp"))
+                    return {
+                        "id": str(m.get("id")),
+                        "author": m.get("sender_name", "Teacher (Class Updates)"),
+                        "posted_at": time_str,
+                        "text": m.get("body") or "",
+                        "raw_time": m.get("message_timestamp"),
+                        "classdojo_url": "https://home.classdojo.com/#/messages",
+                        "web_portal_url": f"https://dojo.herrington.ai/?item={m['id']}",
+                    }
         return None
 
     time_str, _ = parse_and_format_timestamp(item.get("item_timestamp"))
@@ -228,7 +284,7 @@ def get_feed_item(item_id: str) -> Optional[Dict[str, Any]]:
         "text": item.get("content_text") or item.get("body_text") or "",
         "raw_time": item.get("item_timestamp"),
         "classdojo_url": f"https://home.classdojo.com/#/story/{item['id']}",
-        "web_portal_url": f"https://herrington-dojo.web.app/?item={item['id']}",
+        "web_portal_url": f"https://dojo.herrington.ai/?item={item['id']}",
     }
 
 

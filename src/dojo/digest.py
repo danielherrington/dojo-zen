@@ -23,13 +23,15 @@ ACTION_KEYWORDS = [
     "bring", "wear", "sneakers", "shoes", "pack", "permission slip",
     "due", "homework", "submit", "don't forget", "reminder", "please return",
     "by friday", "tomorrow", "bring in", "dollar", "$", "sign and return",
-    "project due", "library books", "snack", "jacket"
+    "project due", "library books", "snack", "jacket", "sight words", "practice"
 ]
 
 DATE_KEYWORDS = [
     "early dismissal", "early release", "no school", "holiday", "closed",
     "field trip", "picture day", "spirit week", "conference", "assembly",
-    "book fair", "parade", "open house", "half day", "starts at", "ends at", "weekend"
+    "book fair", "parade", "open house", "half day", "starts at", "ends at", "weekend",
+    "test schedule", "math test", "spelling test", "sight word review test", "no tests",
+    "due date", "due on", "due monday", "due friday", "teacher planning day"
 ]
 
 WEEKDAYS = {
@@ -122,7 +124,8 @@ def parse_date_or_datetime(val: Any) -> Optional[date]:
 def evaluate_item_temporal_status(
     text: str,
     post_dt: Optional[datetime],
-    ref_dt: Optional[datetime] = None
+    ref_dt: Optional[datetime] = None,
+    context_text: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Evaluates relative time expressions in text relative to post_dt and ref_dt.
@@ -137,6 +140,7 @@ def evaluate_item_temporal_status(
     ref_date = ref_dt.date()
     days_since_post = (ref_date - post_date).days
     lower = text.lower()
+    lower_ctx = (context_text or text).lower()
 
     # 1. "Tomorrow" / "tmrw"
     if re.search(r"\b(tomorrow|tmrw)\b", lower):
@@ -286,9 +290,13 @@ def evaluate_item_temporal_status(
         target_weekday = WEEKDAYS[target_day_name]
         post_weekday = post_date.weekday()
 
-        day_diff = (target_weekday - post_weekday) % 7
-        if "next" in lower and day_diff == 0:
-            day_diff = 7
+        if "next week" in lower or "next week" in lower_ctx:
+            days_to_next_monday = (7 - post_weekday) % 7 or 7
+            day_diff = days_to_next_monday + target_weekday
+        else:
+            day_diff = (target_weekday - post_weekday) % 7
+            if "next" in lower and day_diff == 0:
+                day_diff = 7
 
         target_date = post_date + timedelta(days=day_diff)
         if target_date < ref_date:
@@ -593,7 +601,7 @@ class DigestEngine:
                 is_stale=is_stale_ev
             ))
 
-        # 2. Process Direct Teacher Messages
+        # 2. Process Direct Teacher Messages & Class Updates
         for msg in messages:
             body = (msg.get("body") or "").strip()
             if not body or is_bloat(body):
@@ -604,30 +612,48 @@ class DigestEngine:
             msg_time_val = msg.get("message_timestamp")
             msg_dt = parse_raw_datetime(msg_time_val)
             posted_str, is_stale_msg = parse_and_format_timestamp(msg_time_val)
+            is_already_digested_msg = bool(msg.get("digested_at"))
+            days_old_msg = (ref_date - msg_dt.date()).days if msg_dt else 0
 
-            teacher_notes.append(TeacherNote(
-                sender=sender,
-                body=body,
-                timestamp=msg_time_val,
-                posted_at_str=posted_str,
-                item_id=msg.get("id")
-            ))
-
-            # Scan message body for action items
-            lower_body = body.lower()
-            if any(k in lower_body for k in ACTION_KEYWORDS):
-                action_sent = self._extract_action_sentence(body)
-                eval_res = evaluate_item_temporal_status(action_sent, msg_dt, ref_dt)
-                action_items.append(ActionItem(
-                    summary=eval_res["contextualized_summary"] if not eval_res["is_expired"] else action_sent,
-                    context=f"Message from {sender}",
-                    author=sender,
-                    urgency=eval_res["urgency"],
+            # Only surface recent (< 7 days) undigested messages in the Teacher Messages section
+            if not is_already_digested_msg and days_old_msg <= 7:
+                teacher_notes.append(TeacherNote(
+                    sender=sender,
+                    body=body,
+                    timestamp=msg_time_val,
                     posted_at_str=posted_str,
-                    is_stale=eval_res["is_expired"],
-                    is_transient=eval_res.get("is_transient", False),
                     item_id=msg.get("id")
                 ))
+
+            # Scan multi-line message bodies line-by-line for dates and action items
+            lines = [ln.strip() for ln in re.split(r"[\n]+", body) if ln.strip()]
+            for ln in lines:
+                lower_ln = ln.lower()
+                if any(k in lower_ln for k in DATE_KEYWORDS):
+                    date_eval = evaluate_item_temporal_status(ln, msg_dt, ref_dt, context_text=body)
+                    date_title = date_eval["contextualized_summary"] if date_eval["is_today"] else ln
+                    upcoming_dates.append(UpcomingDate(
+                        title=date_title,
+                        date_str=posted_str,
+                        details=body[:250],
+                        posted_at_str=posted_str,
+                        author=sender,
+                        item_id=msg.get("id"),
+                        is_stale=date_eval["is_expired"]
+                    ))
+                if any(k in lower_ln for k in ACTION_KEYWORDS):
+                    action_sent = self._extract_action_sentence(ln)
+                    eval_res = evaluate_item_temporal_status(action_sent, msg_dt, ref_dt, context_text=body)
+                    action_items.append(ActionItem(
+                        summary=eval_res["contextualized_summary"] if not eval_res["is_expired"] else action_sent,
+                        context=f"Message from {sender}",
+                        author=sender,
+                        urgency=eval_res["urgency"],
+                        posted_at_str=posted_str,
+                        is_stale=eval_res["is_expired"],
+                        is_transient=eval_res.get("is_transient", False),
+                        item_id=msg.get("id")
+                    ))
 
         # 3. Process Story Feed items
         for item in feed_items:
@@ -685,10 +711,28 @@ class DigestEngine:
                 if not is_already_digested and c["image_url"]:
                     image_urls.append(c["image_url"])
 
-            # Check for dates / events in text
-            if any(k in lower for k in DATE_KEYWORDS):
+            # Check for dates / events in text (scan line-by-line so multi-bullet schedule posts capture all dates)
+            post_lines = [ln.strip() for ln in re.split(r"[\n]+", content) if ln.strip()]
+            found_date = False
+            for ln in post_lines:
+                if any(k in ln.lower() for k in DATE_KEYWORDS):
+                    found_date = True
+                    date_eval = evaluate_item_temporal_status(ln, item_dt, ref_dt, context_text=content)
+                    date_title = date_eval["contextualized_summary"] if date_eval["is_today"] else ln
+                    upcoming_dates.append(UpcomingDate(
+                        title=date_title,
+                        date_str=posted_str,
+                        details=content[:200],
+                        posted_at_str=posted_str,
+                        author=author,
+                        image_urls=image_urls,
+                        video_urls=video_urls,
+                        item_id=item_id,
+                        is_stale=date_eval["is_expired"]
+                    ))
+            if not found_date and any(k in lower for k in DATE_KEYWORDS):
                 sentence = self._extract_date_sentence(content)
-                date_eval = evaluate_item_temporal_status(sentence, item_dt, ref_dt)
+                date_eval = evaluate_item_temporal_status(sentence, item_dt, ref_dt, context_text=content)
                 date_title = date_eval["contextualized_summary"] if date_eval["is_today"] else sentence
                 upcoming_dates.append(UpcomingDate(
                     title=date_title,
@@ -705,7 +749,7 @@ class DigestEngine:
             # Check for action items
             if any(k in lower for k in ACTION_KEYWORDS):
                 action_sent = self._extract_action_sentence(content)
-                eval_res = evaluate_item_temporal_status(action_sent, item_dt, ref_dt)
+                eval_res = evaluate_item_temporal_status(action_sent, item_dt, ref_dt, context_text=content)
                 action_items.append(ActionItem(
                     summary=eval_res["contextualized_summary"] if not eval_res["is_expired"] else action_sent,
                     context=f"Posted by {author}",

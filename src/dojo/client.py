@@ -12,7 +12,7 @@ BASE_URL = "https://home.classdojo.com"
 LOGIN_URL = f"{BASE_URL}/api/session"
 FEED_URL = f"{BASE_URL}/api/storyFeed?includePrivate=true"
 MESSAGES_URL = f"{BASE_URL}/api/conversations"
-EVENTS_URL = f"{BASE_URL}/api/events"
+EVENTS_URL = f"{BASE_URL}/api/calendar-event"
 
 DEFAULT_HEADERS = {
     "User-Agent": (
@@ -242,29 +242,154 @@ class DojoClient:
         return all_items[:limit]
 
     def get_messages(self) -> List[Dict[str, Any]]:
-        """Fetch direct messages / conversations between parent and teacher."""
+        """Fetch messages across all parent threads (Class Updates, Direct Teacher, Class Chat, School Updates)."""
+        all_messages: List[Dict[str, Any]] = []
+        seen_ids = set()
+
+        # 1. Modern ClassDojo message-thread API (/api/parent/{parent_id}/message-thread)
         try:
-            resp = self.client.get(MESSAGES_URL)
-            if resp.status_code == 200:
-                data = resp.json()
-                if isinstance(data, list):
-                    return data
-                return data.get("_items") or data.get("conversations") or []
+            session = self.get_session_info()
+            parent = session.get("parent") or {}
+            parent_id = parent.get("_id")
+            if parent_id:
+                threads_resp = self.client.get(f"{BASE_URL}/api/parent/{parent_id}/message-thread")
+                if threads_resp.status_code == 200:
+                    threads = threads_resp.json().get("_items") or []
+                    for thread in threads:
+                        thread_id = thread.get("_id")
+                        if not thread_id:
+                            continue
+                        thread_name = thread.get("name") or "Class Thread"
+                        thread_type = thread.get("type") or ""
+                        msg_resp = self.client.get(f"{BASE_URL}/api/message-thread/{thread_id}/message")
+                        if msg_resp.status_code != 200:
+                            continue
+                        raw_msgs = msg_resp.json().get("_items") or []
+                        for m in raw_msgs:
+                            msg_id = str(m.get("_id") or m.get("id") or "")
+                            body = (m.get("body") or m.get("text") or "").strip()
+                            attachments = m.get("attachments") or []
+                            # Skip system join placeholder messages or empty system events
+                            if (
+                                not msg_id
+                                or msg_id == "000000000000000000000000"
+                                or body == "You joined the class"
+                                or (not body and not attachments)
+                            ):
+                                continue
+                            if msg_id in seen_ids:
+                                continue
+                            seen_ids.add(msg_id)
+
+                            sender = m.get("sender") or {}
+                            sender_id = sender.get("_id") or sender.get("id") or ""
+                            base_sender = (
+                                sender.get("formattedName")
+                                or sender.get("name")
+                                or f"{sender.get('title', '')} {sender.get('lastName', '')}".strip()
+                                or f"{sender.get('firstName', '')} {sender.get('lastName', '')}".strip()
+                                or "Teacher"
+                            )
+
+                            if thread_type == "b":
+                                sender_label = f"{base_sender} — Class Updates ({thread_name})"
+                            elif thread_name and base_sender.lower() not in thread_name.lower():
+                                sender_label = f"{base_sender} ({thread_name})"
+                            else:
+                                sender_label = base_sender
+
+                            enriched = dict(m)
+                            enriched["id"] = msg_id
+                            enriched["conversation_id"] = str(thread_id)
+                            enriched["thread_name"] = thread_name
+                            enriched["thread_type"] = thread_type
+                            enriched["sender_id"] = str(sender_id)
+                            enriched["sender_name"] = sender_label
+                            enriched["body"] = body
+                            enriched["message_timestamp"] = m.get("createdAt") or m.get("time") or m.get("message_timestamp")
+                            all_messages.append(enriched)
         except Exception as e:
-            logger.debug(f"Could not fetch direct conversations: {e}")
-        return []
+            logger.debug(f"Could not fetch message threads: {e}")
+
+        # 2. Fallback to legacy /api/conversations if no threads returned
+        if not all_messages:
+            try:
+                resp = self.client.get(MESSAGES_URL)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if isinstance(data, list):
+                        return data
+                    return data.get("_items") or data.get("conversations") or []
+            except Exception as e:
+                logger.debug(f"Could not fetch direct conversations: {e}")
+
+        return all_messages
 
     def get_events(self) -> List[Dict[str, Any]]:
-        """Fetch upcoming calendar events."""
+        """Fetch upcoming calendar events from /api/calendar-event."""
         try:
             resp = self.client.get(EVENTS_URL)
             if resp.status_code == 200:
                 data = resp.json()
-                if isinstance(data, list):
-                    return data
-                return data.get("_items") or data.get("events") or []
+                raw_items = data if isinstance(data, list) else (data.get("_items") or data.get("events") or [])
+                normalized: List[Dict[str, Any]] = []
+                for ev in raw_items:
+                    contents = ev.get("contents") or {}
+                    target = ev.get("target") or {}
+                    hosts = ev.get("hosts") or []
+                    host_name = hosts[0].get("displayName") if hosts and isinstance(hosts[0], dict) else None
+                    enriched = dict(ev)
+                    enriched["id"] = str(ev.get("_id") or ev.get("id") or "")
+                    enriched["class_id"] = ev.get("class_id") or target.get("_id")
+                    enriched["title"] = (
+                        ev.get("title")
+                        or ev.get("name")
+                        or contents.get("title")
+                        or "School Event"
+                    )
+                    enriched["description"] = (
+                        ev.get("description")
+                        or contents.get("description")
+                        or ""
+                    )
+                    enriched["start_time"] = (
+                        ev.get("start_time")
+                        or ev.get("start")
+                        or ev.get("startsAt")
+                        or ev.get("date")
+                    )
+                    enriched["end_time"] = (
+                        ev.get("end_time")
+                        or ev.get("end")
+                        or ev.get("endsAt")
+                    )
+                    enriched["location"] = (
+                        ev.get("location")
+                        or target.get("name")
+                        or host_name
+                        or ""
+                    )
+                    normalized.append(enriched)
+                return normalized
         except Exception as e:
             logger.debug(f"Could not fetch events endpoint: {e}")
+        return []
+
+    def get_awards(self, student_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Fetch behavior / skill points awarded to the student."""
+        try:
+            if not student_id:
+                students = self.get_students()
+                if students:
+                    student_id = str(students[0].get("_id") or students[0].get("id"))
+            if not student_id:
+                return []
+            resp = self.client.get(f"{BASE_URL}/api/award?studentId={student_id}")
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("_items") or []
+        except Exception as e:
+            logger.debug(f"Could not fetch student awards: {e}")
         return []
 
     def close(self) -> None:

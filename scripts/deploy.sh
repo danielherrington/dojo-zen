@@ -20,6 +20,11 @@ PYTHONPATH=src uv run python -m dojo seed-firestore
 # 2. Deploy Cloud Run Service
 echo ""
 echo "☁️ Step 2: Building & Deploying Cloud Run Service '$SERVICE_NAME'..."
+ENV_FLAG=()
+if [ -f ".env.yaml" ]; then
+  ENV_FLAG=(--env-vars-file .env.yaml)
+fi
+
 gcloud run deploy "$SERVICE_NAME" \
   --source . \
   --region "$REGION" \
@@ -29,7 +34,7 @@ gcloud run deploy "$SERVICE_NAME" \
   --cpu 1 \
   --min-instances 0 \
   --max-instances 2 \
-  --env-vars-file .env.yaml
+  "${ENV_FLAG[@]}"
 
 # Get Cloud Run Service URL
 SERVICE_URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --project "$PROJECT_ID" --format 'value(status.url)')

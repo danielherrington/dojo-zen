@@ -50,6 +50,9 @@ class MessageMonitor:
 
                 feed = client.get_story_feed(limit=20)
                 self.db.upsert_feed_items(feed)
+
+                events = client.get_events()
+                self.db.upsert_events(events)
         except Exception as e:
             logger.warning(f"Warning during monitor sync: {e}")
 

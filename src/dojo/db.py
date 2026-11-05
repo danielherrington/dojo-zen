@@ -183,13 +183,17 @@ class DojoDatabase:
 
                 content_text = item.get("content_text") or item.get("contents", {}).get("body") or item.get("body") or ""
                 header = item.get("header") or item.get("contents", {}).get("title") or item.get("title") or ""
-                
+                if item.get("pinnedAt") and not header.startswith("📌"):
+                    header = f"📌 Pinned: {header}".strip(": ")
+
                 sender_name = item.get("senderName") or item.get("headerText") or item.get("author_name") or item.get("author", {}).get("name") or ""
                 subtext = item.get("headerSubtext") or item.get("targetName") or ""
                 if sender_name and subtext and subtext != sender_name:
                     author = f"{sender_name} ({subtext})"
                 else:
                     author = sender_name or subtext or ""
+                if item.get("pinnedAt") and "📌" not in author:
+                    author = f"📌 {author} (Pinned)"
 
                 item_time = item.get("item_timestamp") or item.get("time") or item.get("createdAt")
 
@@ -256,8 +260,20 @@ class DojoDatabase:
                 exists = cur.fetchone() is not None
 
                 body = msg.get("body") or msg.get("text") or ""
-                sender_name = msg.get("sender_name") or msg.get("sender", {}).get("name") or ""
-                sender_id = msg.get("sender_id") or msg.get("sender", {}).get("id") or ""
+                sender_obj = msg.get("sender") or {}
+                sender_name = (
+                    msg.get("sender_name")
+                    or sender_obj.get("formattedName")
+                    or sender_obj.get("name")
+                    or ""
+                )
+                sender_id = (
+                    msg.get("sender_id")
+                    or sender_obj.get("_id")
+                    or sender_obj.get("id")
+                    or ""
+                )
+                conv_id = msg.get("conversation_id") or msg.get("messageThreadId")
                 time_val = msg.get("message_timestamp") or msg.get("time") or msg.get("createdAt")
 
                 if exists:
@@ -269,7 +285,7 @@ class DojoDatabase:
                             body = ?,
                             message_timestamp = coalesce(?, message_timestamp)
                         WHERE id = ?
-                    """, (msg.get("conversation_id"), sender_id, sender_name, body, time_val, msg_id))
+                    """, (conv_id, sender_id, sender_name, body, time_val, msg_id))
                     updated_count += 1
                 else:
                     conn.execute("""
@@ -277,7 +293,7 @@ class DojoDatabase:
                             id, conversation_id, sender_id, sender_name,
                             body, message_timestamp, fetched_at, digested_at
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
-                    """, (msg_id, msg.get("conversation_id"), sender_id, sender_name, body, time_val, now))
+                    """, (msg_id, conv_id, sender_id, sender_name, body, time_val, now))
                     new_count += 1
             conn.commit()
 
@@ -297,11 +313,14 @@ class DojoDatabase:
                 cur = conn.execute("SELECT id FROM events WHERE id = ?", (ev_id,))
                 exists = cur.fetchone() is not None
 
-                title = ev.get("title") or ev.get("name") or "School Event"
-                desc = ev.get("description") or ""
-                start_time = ev.get("start_time") or ev.get("startsAt") or ev.get("date")
-                end_time = ev.get("end_time") or ev.get("endsAt")
-                loc = ev.get("location") or ""
+                contents = ev.get("contents") or {}
+                target = ev.get("target") or {}
+                title = ev.get("title") or ev.get("name") or contents.get("title") or "School Event"
+                desc = ev.get("description") or contents.get("description") or ""
+                start_time = ev.get("start_time") or ev.get("start") or ev.get("startsAt") or ev.get("date")
+                end_time = ev.get("end_time") or ev.get("end") or ev.get("endsAt")
+                loc = ev.get("location") or target.get("name") or ""
+                class_id = ev.get("class_id") or target.get("_id")
 
                 if exists:
                     conn.execute("""
@@ -313,7 +332,7 @@ class DojoDatabase:
                             end_time = coalesce(?, end_time),
                             location = ?
                         WHERE id = ?
-                    """, (ev.get("class_id"), title, desc, start_time, end_time, loc, ev_id))
+                    """, (class_id, title, desc, start_time, end_time, loc, ev_id))
                     updated_count += 1
                 else:
                     conn.execute("""
@@ -321,7 +340,7 @@ class DojoDatabase:
                             id, class_id, title, description, start_time,
                             end_time, location, fetched_at, digested_at
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
-                    """, (ev_id, ev.get("class_id"), title, desc, start_time, end_time, loc, now))
+                    """, (ev_id, class_id, title, desc, start_time, end_time, loc, now))
                     new_count += 1
             conn.commit()
 
