@@ -57,11 +57,17 @@ def test_synthesize_action_items_and_dates():
 
     events = [
         {
-            "id": "ev_1",
+            "id": "ev_tomorrow",
             "title": "Fall Picture Day",
             "description": "Wear your best smile! Uniform optional.",
+            "start_time": "2026-09-15"
+        },
+        {
+            "id": "ev_next_week",
+            "title": "PTA Curriculum Night",
+            "description": "Next week evening event.",
             "start_time": "2026-09-22"
-        }
+        },
     ]
 
     children = [{"name": "Leo"}]
@@ -81,10 +87,20 @@ def test_synthesize_action_items_and_dates():
     assert "shoe box" in action_summaries
     assert "permission slip" in action_summaries
 
-    # 3. Dates captured
-    assert len(briefing.upcoming_dates) >= 2
+    # 3. Dates captured: Tomorrow's event + newly posted Friday announcement included; 8-day-out calendar event excluded
+    assert len(briefing.upcoming_dates) == 2
     date_titles = " ".join([d.title.lower() for d in briefing.upcoming_dates])
-    assert "early dismissal" in date_titles or "fall picture day" in date_titles
+    assert "early dismissal" in date_titles
+    assert "tomorrow: fall picture day" in date_titles
+    assert "pta curriculum night" not in date_titles
+
+    # Broad mode (daily_focus=False) retains far-future calendar events for MCP calendar queries
+    broad_briefing = engine.synthesize(
+        feed_items, messages, events, children,
+        ref_dt=datetime(2026, 9, 14, 12, 0, tzinfo=timezone.utc),
+        daily_focus=False,
+    )
+    assert any("pta curriculum night" in d.title.lower() for d in broad_briefing.upcoming_dates)
 
     # 4. Teacher note captured
     assert len(briefing.teacher_notes) == 1
@@ -100,15 +116,17 @@ def test_synthesize_action_items_and_dates():
     assert "DOJOZEN DAILY BRIEFING" in plain_text
     assert "ACTION ITEMS & TO-DOS" in plain_text
     assert "shoe box" in plain_text.lower()
+    assert "PAST NOTICES" not in plain_text
     assert "Filtered out 1 marketing/bloat items" in plain_text
 
-    # 7. HTML Email rendering contains images
+    # 7. HTML Email rendering contains images and omits Past Notices
     from dojo.config import settings
     from dojo.mailer import Mailer
     mailer = Mailer(settings)
     html = mailer.render_html(briefing)
     assert '<img src="http://img/1.jpg"' in html
     assert '<img src="http://img/2.jpg"' in html
+    assert "Past Notices" not in html
 
 
 def test_synthesize_excludes_images_for_already_digested_items():
@@ -148,11 +166,11 @@ def test_synthesize_excludes_images_for_already_digested_items():
         ref_dt=datetime(2026, 9, 17, 12, 0, tzinfo=timezone.utc)
     )
 
-    # 1. Action items are retained for context, but old ones have no image_urls
+    # 1. Action items due Tomorrow (Friday Sep 18) are retained for context, with old photo stripped
     actions_by_summary = {a.summary.lower(): a for a in briefing.action_items}
     # Fresh action item keeps its photo
     assert any("sign the form" in k and a.image_urls == ["http://img/fresh_form.jpg"] for k, a in actions_by_summary.items())
-    # Already-digested action item retains the action text, but strips the photo
+    # Already-digested action item for Tomorrow retains the action text, but strips the photo
     assert any("library books" in k and a.image_urls == [] for k, a in actions_by_summary.items())
 
     # 2. Already-digested photo gallery / highlight is completely omitted
@@ -229,7 +247,7 @@ def test_past_events_and_deadlines_filtered_out():
             "content_text": "Happy Weekend Seahawks! Parents, please take time this weekend to login to your portal",
             "item_timestamp": "2026-09-18T12:00:00Z"  # Friday Sep 18
         },
-        # Daily homework assigned yesterday afternoon remains active
+        # Daily homework assigned yesterday evening (<24h) remains active
         {
             "id": "daily_hw",
             "author_name": "Ms. Miller",
@@ -247,10 +265,8 @@ def test_past_events_and_deadlines_filtered_out():
     assert not any("no school on Monday" in s for s in active_summaries)
     assert not any("town hall meeting" in s for s in active_summaries)
 
-    # Expired past notices should NOT clutter with transient noise
-    expired_summaries = [a.summary for a in briefing.expired_action_items]
-    assert not any("no school on Monday" in s for s in expired_summaries)
-    assert not any("town hall meeting" in s for s in expired_summaries)
+    # Expired past notices are completely dropped
+    assert briefing.expired_action_items == []
 
     # Upcoming dates should NOT contain the past weekend
     upcoming_titles = [d.title for d in briefing.active_upcoming_dates]
@@ -259,6 +275,7 @@ def test_past_events_and_deadlines_filtered_out():
 
 def test_video_and_file_attachments_synthesis():
     """Ensure videos use thumbnailPath for image_urls and are labeled as videos rather than broken photos."""
+    from datetime import datetime, timezone
     engine = DigestEngine()
 
     feed_items = [
@@ -302,7 +319,8 @@ def test_video_and_file_attachments_synthesis():
         }
     ]
 
-    briefing = engine.synthesize(feed_items=feed_items, messages=[], events=[])
+    same_day_ref = datetime(2026, 10, 3, 20, 0, tzinfo=timezone.utc)
+    briefing = engine.synthesize(feed_items=feed_items, messages=[], events=[], ref_dt=same_day_ref)
     assert len(briefing.classroom_highlights) == 2
 
     # Check puppy video post
@@ -312,7 +330,7 @@ def test_video_and_file_attachments_synthesis():
     assert puppy_hl.attachment_label == "🎥 1 video"
     # Crucial: image_urls must be the valid JPEG thumbnail, NEVER the .mp4 URL!
     assert puppy_hl.image_urls == ["https://svideos.classdojo.com/123/puppy_poster.jpg?token=abc"]
-    assert puppy_hl.video_urls == ["https://svideos.classdojo.com/123/puppy_mp4" if False else "https://svideos.classdojo.com/123/puppy.mp4?token=abc"]
+    assert puppy_hl.video_urls == ["https://svideos.classdojo.com/123/puppy.mp4?token=abc"]
 
     # Check mixed post
     mixed_hl = next(h for h in briefing.classroom_highlights if h.author == "Mr. Davis")
@@ -328,5 +346,117 @@ def test_video_and_file_attachments_synthesis():
     assert not any(".pdf" in u for u in mixed_hl.image_urls)
     assert mixed_hl.video_urls == ["https://svideos.classdojo.com/volcano.mp4"]
     assert mixed_hl.file_urls == ["https://sfiles.classdojo.com/lab_guide.pdf"]
+
+    # Days later (>24h), old casual highlights are excluded from the daily briefing
+    next_month_ref = datetime(2026, 11, 5, 12, 0, tzinfo=timezone.utc)
+    stale_briefing = engine.synthesize(feed_items=feed_items, messages=[], events=[], ref_dt=next_month_ref)
+    assert stale_briefing.classroom_highlights == []
+    assert stale_briefing.is_empty()
+
+
+def test_daily_focus_lifecycle_announce_quiet_tomorrow_today_expire():
+    """Verify a Friday deadline posted Monday: announces Tue AM (<24h), stays quiet Wed, resurfaces Thu ('Tomorrow') & Fri ('Today'), disappears Sat."""
+    from datetime import datetime, timezone
+    engine = DigestEngine()
+
+    # Posted Monday Sep 14 at 6:00 PM UTC
+    post_undigested = [{
+        "id": "fri_math_test",
+        "author_name": "Ms. Alonso",
+        "content_text": "Reminder: Chapter 5 math test on Friday! Please bring a #2 pencil on Friday.",
+        "item_timestamp": "2026-09-14T18:00:00Z",
+        "digested_at": None,
+    }]
+
+    # 1. Tuesday Sep 15 at 11:00 AM UTC (17h later, undigested) -> surfaced once as fresh announcement
+    b_tue = engine.synthesize(
+        post_undigested, [], [],
+        ref_dt=datetime(2026, 9, 15, 11, 0, tzinfo=timezone.utc),
+    )
+    assert len(b_tue.active_upcoming_dates) == 1
+    assert len(b_tue.active_action_items) == 1
+
+    # Mark digested after Tuesday morning's email
+    post_digested = [{**post_undigested[0], "digested_at": "2026-09-15T11:05:00Z"}]
+
+    # 2. Wednesday Sep 16 at 11:00 AM UTC (>24h & digested, Friday is 2 days away) -> completely quiet!
+    b_wed = engine.synthesize(
+        post_digested, [], [],
+        ref_dt=datetime(2026, 9, 16, 11, 0, tzinfo=timezone.utc),
+    )
+    assert b_wed.is_empty()
+
+    # 3. Thursday Sep 17 at 11:00 AM UTC (Friday is Tomorrow!) -> resurfaces as Tomorrow!
+    b_thu = engine.synthesize(
+        post_digested, [], [],
+        ref_dt=datetime(2026, 9, 17, 11, 0, tzinfo=timezone.utc),
+    )
+    assert len(b_thu.active_upcoming_dates) == 1
+    assert b_thu.active_upcoming_dates[0].title.startswith("Tomorrow (Friday):")
+    assert len(b_thu.active_action_items) == 1
+    assert b_thu.active_action_items[0].urgency == "normal"
+
+    # 4. Friday Sep 18 at 11:00 AM UTC (Friday is Today!) -> resurfaces with HIGH urgency!
+    b_fri = engine.synthesize(
+        post_digested, [], [],
+        ref_dt=datetime(2026, 9, 18, 11, 0, tzinfo=timezone.utc),
+    )
+    assert len(b_fri.active_upcoming_dates) == 1
+    assert b_fri.active_upcoming_dates[0].title.startswith("Today (Friday):")
+    assert len(b_fri.active_action_items) == 1
+    assert b_fri.active_action_items[0].urgency == "high"
+
+    # 5. Saturday Sep 19 at 11:00 AM UTC -> expired & omitted, zero Past Notices
+    b_sat = engine.synthesize(
+        post_digested, [], [],
+        ref_dt=datetime(2026, 9, 19, 11, 0, tzinfo=timezone.utc),
+    )
+    assert b_sat.is_empty()
+    assert b_sat.expired_action_items == []
+
+
+def test_daily_focus_filters_messages_and_highlights_older_than_24h():
+    """Ensure Teacher Messages and Classroom Highlights older than 24h are excluded even if undigested."""
+    from datetime import datetime, timezone
+    engine = DigestEngine()
+    ref_dt = datetime(2026, 9, 20, 12, 0, tzinfo=timezone.utc)
+
+    messages = [
+        {
+            "id": "msg_old",
+            "sender_name": "Ms. Alonso",
+            "body": "Great job in reading group earlier this week!",
+            "message_timestamp": "2026-09-17T15:00:00Z",  # 3 days ago, undigested
+            "digested_at": None,
+        },
+        {
+            "id": "msg_fresh",
+            "sender_name": "Ms. Alonso",
+            "body": "Isabella participated wonderfully in math circle!",
+            "message_timestamp": "2026-09-20T09:00:00Z",  # 3 hours ago, undigested
+            "digested_at": None,
+        },
+    ]
+
+    feed_items = [
+        {
+            "id": "hl_old",
+            "author_name": "Art Teacher",
+            "content_text": "Clay sculptures from Wednesday!",
+            "item_timestamp": "2026-09-16T14:00:00Z",  # 4 days ago, undigested
+            "digested_at": None,
+        },
+        {
+            "id": "hl_fresh",
+            "author_name": "Music Teacher",
+            "content_text": "Practicing xylophones this morning!",
+            "item_timestamp": "2026-09-20T10:30:00Z",  # 1.5 hours ago, undigested
+            "digested_at": None,
+        },
+    ]
+
+    briefing = engine.synthesize(feed_items, messages, [], ref_dt=ref_dt)
+    assert [m.item_id for m in briefing.teacher_notes] == ["msg_fresh"]
+    assert [h.item_id for h in briefing.classroom_highlights] == ["hl_fresh"]
 
 

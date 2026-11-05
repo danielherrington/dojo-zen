@@ -126,31 +126,35 @@ def cmd_sync(args: argparse.Namespace) -> None:
 
 
 def cmd_recap(args: argparse.Namespace) -> None:
-    """Generate anti-bloat briefing and optionally send via email."""
+    """Generate anti-bloat daily briefing and optionally send via email."""
+    from dojo.digest import collect_briefing_inputs
+
     db = get_db()
-    data = db.get_undigested_items()
+    inputs = collect_briefing_inputs(db)
+    undigested = inputs["undigested"]
 
-    feed_items = data["feed_items"]
-    messages = data["messages"]
-    events = data["events"]
-
-    total_undigested = len(feed_items) + len(messages) + len(events)
-    if total_undigested == 0 and not args.force:
-        console.print("[bold green]✨ All caught up! No new items to recap.[/bold green]")
-        console.print("[dim]Use --force to generate a recap anyway.[/dim]")
-        return
-
-    # Fetch children for header
-    children = db.get_all_children() if hasattr(db, "get_all_children") else []
+    u_feed_ids = [str(f["id"]) for f in undigested.get("feed_items", []) if f.get("id")]
+    u_msg_ids = [str(m["id"]) for m in undigested.get("messages", []) if m.get("id")]
+    u_ev_ids = [str(e["id"]) for e in undigested.get("events", []) if e.get("id")]
 
     engine = DigestEngine(gemini_api_key=settings.gemini_api_key)
     briefing = engine.synthesize(
-        feed_items=feed_items,
-        messages=messages,
-        events=events,
-        children=children
+        feed_items=inputs["feed_items"],
+        messages=inputs["messages"],
+        events=inputs["events"],
+        children=inputs["children"],
+        daily_focus=True,
+        respect_digested=True,
     )
 
+    if briefing.is_empty() and not args.force:
+        if args.send_email and not args.dry_run and (u_feed_ids or u_msg_ids or u_ev_ids):
+            db.mark_items_digested(u_feed_ids, u_msg_ids, u_ev_ids)
+        console.print("[bold green]✨ All caught up for today! Nothing due today/tomorrow and no new updates in the last 24h.[/bold green]")
+        console.print("[dim]Use --force to generate or send a recap anyway.[/dim]")
+        return
+
+    daily_count = briefing.daily_item_count
     plain_text = engine.format_plain_text(briefing)
     console.print(Panel(plain_text, title="🎒 ClassDojo Daily Briefing", border_style="green"))
 
@@ -170,40 +174,31 @@ def cmd_recap(args: argparse.Namespace) -> None:
                 mailer.send_digest(briefing, plain_text, to_email=to_email)
             console.print(f"[bold green]✓ Email digest successfully sent to {to_email}![/bold green]")
 
-            # Mark items as digested in SQLite
+            # Mark undigested items as digested in database
             if not args.dry_run:
-                feed_ids = [str(f["id"]) for f in feed_items]
-                msg_ids = [str(m["id"]) for m in messages]
-                ev_ids = [str(e["id"]) for e in events]
-                db.mark_items_digested(feed_ids, msg_ids, ev_ids)
-                db.record_digest(html_content, plain_text, to_email, total_undigested, "sent")
+                if u_feed_ids or u_msg_ids or u_ev_ids:
+                    db.mark_items_digested(u_feed_ids, u_msg_ids, u_ev_ids)
+                db.record_digest(html_content, plain_text, to_email, daily_count, "sent")
                 console.print("[dim]Marked items as digested in database.[/dim]")
 
         except Exception as e:
             console.print(f"[bold red]Failed to send email: {e}[/bold red]")
-            db.record_digest(html_content, plain_text, to_email, total_undigested, f"failed: {e}")
+            db.record_digest(html_content, plain_text, to_email, daily_count, f"failed: {e}")
             sys.exit(1)
 
 
 def cmd_run(args: argparse.Namespace) -> None:
-    """One-shot command: Sync from ClassDojo and send email recap if new items exist."""
+    """One-shot command: Sync from ClassDojo and send email recap if daily-relevant items exist."""
     console.print("[bold blue]Starting automated Dojo Agent run...[/bold blue]")
 
     # 1. Sync
     args.limit = getattr(args, "limit", 50)
     cmd_sync(args)
 
-    # 2. Check undigested
-    db = get_db()
-    stats = db.get_stats()
-    if stats["undigested_items"] == 0 and not getattr(args, "force", False):
-        console.print("[bold green]No new items to recap today. Done![/bold green]")
-        return
-
-    # 3. Recap & Send Email
+    # 2. Evaluate daily-focused recap & send email only if relevant (or forced)
     args.send_email = True
     args.dry_run = False
-    args.force = False
+    args.force = getattr(args, "force", False)
     args.to = getattr(args, "to", None)
     cmd_recap(args)
 

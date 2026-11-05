@@ -46,32 +46,24 @@ def _get_db():
 
 @mcp.tool()
 def get_daily_briefing(force: bool = False) -> str:
-    """Generate the anti-bloat morning briefing for parents, summarizing high-signal action items
-    (what to bring, homework, materials), upcoming calendar dates, and teacher announcements.
+    """Generate the strictly daily-focused anti-bloat briefing for parents, summarizing action items
+    and events for Today + Tomorrow plus any new teacher announcements/highlights from the last 24 hours.
 
     Args:
         force: If True, generate the briefing even if all items were previously marked as digested.
     """
+    from dojo.digest import collect_briefing_inputs
+
     db = _get_db()
-    data = db.get_undigested_items()
-    feed_items = data["feed_items"]
-    messages = data["messages"]
-    events = data["events"]
-
-    total = len(feed_items) + len(messages) + len(events)
-    if total == 0 and not force:
-        # Fallback to recent 20 items so the briefing is always informative
-        recent = db.get_all_feed_items(limit=20)
-        feed_items = recent
-        messages = db.get_all_messages(limit=20) if hasattr(db, "get_all_messages") else []
-
-    children = db.get_all_children() if hasattr(db, "get_all_children") else []
+    inputs = collect_briefing_inputs(db)
     engine = DigestEngine(gemini_api_key=settings.gemini_api_key)
     briefing = engine.synthesize(
-        feed_items=feed_items,
-        messages=messages,
-        events=events,
-        children=children,
+        feed_items=inputs["feed_items"],
+        messages=inputs["messages"],
+        events=inputs["events"],
+        children=inputs["children"],
+        daily_focus=True,
+        respect_digested=False,
     )
     return engine.format_plain_text(briefing)
 
@@ -85,7 +77,13 @@ def get_action_items() -> List[Dict[str, Any]]:
     recent = db.get_all_feed_items(limit=50)
     messages = db.get_all_messages(limit=30) if hasattr(db, "get_all_messages") else []
     engine = DigestEngine(gemini_api_key=settings.gemini_api_key)
-    briefing = engine.synthesize(feed_items=recent, messages=messages, events=[], children=[])
+    briefing = engine.synthesize(
+        feed_items=recent,
+        messages=messages,
+        events=[],
+        children=[],
+        daily_focus=False,
+    )
 
     return [
         {
@@ -110,7 +108,13 @@ def get_upcoming_dates() -> List[Dict[str, Any]]:
     messages = db.get_all_messages(limit=30) if hasattr(db, "get_all_messages") else []
     events = db.get_all_events() if hasattr(db, "get_all_events") else []
     engine = DigestEngine(gemini_api_key=settings.gemini_api_key)
-    briefing = engine.synthesize(feed_items=recent, messages=messages, events=events, children=[])
+    briefing = engine.synthesize(
+        feed_items=recent,
+        messages=messages,
+        events=events,
+        children=[],
+        daily_focus=False,
+    )
 
     return [
         {

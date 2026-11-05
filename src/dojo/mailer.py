@@ -164,43 +164,52 @@ def dispatch_daily_briefing(
     settings: Optional[Settings] = None,
     force: bool = False,
     to_email: Optional[str] = None,
-    dry_run: bool = False
+    dry_run: bool = False,
+    ref_dt: Optional[Any] = None,
 ) -> dict:
-    """Compile and dispatch daily briefing email, marking items digested and recording audit log."""
+    """Compile and dispatch daily briefing email, skipping quiet days with nothing relevant unless forced."""
     from dojo.config import settings as default_settings
-    from dojo.digest import DigestEngine
+    from dojo.digest import DigestEngine, collect_briefing_inputs
 
     s = settings or default_settings
-    data = db.get_undigested_items()
-    feed_items = data["feed_items"]
-    messages = data["messages"]
-    events = data["events"]
+    inputs = collect_briefing_inputs(db)
+    undigested = inputs["undigested"]
+    feed_items = inputs["feed_items"]
+    messages = inputs["messages"]
+    events = inputs["events"]
+    children = inputs["children"]
 
-    total_undigested = len(feed_items) + len(messages) + len(events)
-    if total_undigested == 0:
-        # If no new items arrived overnight or since last digest, compile recent items so morning/evening briefing always delivers
-        feed_items = db.get_all_feed_items(limit=15) if hasattr(db, "get_all_feed_items") else []
-        messages = db.get_all_messages(limit=10) if hasattr(db, "get_all_messages") else []
-        events = db.get_all_events() if hasattr(db, "get_all_events") else []
-        total_undigested = len(feed_items) + len(messages) + len(events)
-        if total_undigested == 0:
-            return {"status": "skipped", "reason": "No items found in database", "count": 0}
+    total_candidates = len(feed_items) + len(messages) + len(events)
+    if total_candidates == 0 and not force:
+        return {"status": "skipped", "reason": "No items found in database", "count": 0}
 
-    children = db.get_all_children() if hasattr(db, "get_all_children") else []
     engine = DigestEngine(gemini_api_key=s.gemini_api_key)
     briefing = engine.synthesize(
         feed_items=feed_items,
         messages=messages,
         events=events,
-        children=children
+        children=children,
+        ref_dt=ref_dt,
+        daily_focus=True,
+        respect_digested=True,
     )
 
+    u_feed_ids = [str(f["id"]) for f in undigested.get("feed_items", []) if f.get("id")]
+    u_msg_ids = [str(m["id"]) for m in undigested.get("messages", []) if m.get("id")]
+    u_ev_ids = [str(e["id"]) for e in undigested.get("events", []) if e.get("id")]
+
+    if briefing.is_empty() and not force:
+        if not dry_run and (u_feed_ids or u_msg_ids or u_ev_ids):
+            db.mark_items_digested(u_feed_ids, u_msg_ids, u_ev_ids)
+        return {"status": "skipped", "reason": "No daily-relevant items for today", "count": 0}
+
+    daily_count = briefing.daily_item_count
     text_content = engine.format_plain_text(briefing)
     mailer = Mailer(s)
 
     if dry_run:
         html_preview = mailer.render_html(briefing)
-        return {"status": "dry_run", "item_count": total_undigested, "preview_html": html_preview}
+        return {"status": "dry_run", "item_count": daily_count, "preview_html": html_preview}
 
     email_sent = mailer.send_digest(briefing, text_content, to_email=to_email)
     html_content = mailer.render_html(briefing)
@@ -210,14 +219,12 @@ def dispatch_daily_briefing(
         content_html=html_content,
         content_text=text_content,
         recipient_email=recipient,
-        item_count=total_undigested,
+        item_count=daily_count,
         sent_status="sent" if email_sent else "failed"
     )
 
-    feed_ids = [f["id"] for f in feed_items if f.get("id")]
-    message_ids = [m["id"] for m in messages if m.get("id")]
-    event_ids = [e["id"] for e in events if e.get("id")]
-    db.mark_items_digested(feed_ids, message_ids, event_ids)
+    if u_feed_ids or u_msg_ids or u_ev_ids:
+        db.mark_items_digested(u_feed_ids, u_msg_ids, u_ev_ids)
 
-    return {"status": "sent", "item_count": total_undigested, "recipient": recipient}
+    return {"status": "sent", "item_count": daily_count, "recipient": recipient}
 

@@ -12,21 +12,24 @@ description: >-
 
 ## Overview
 
-[`DigestEngine`](../../src/dojo/digest.py) transforms raw ClassDojo feed posts, Class Updates / teacher messages, and calendar events into a structured `Briefing` containing:
-- `active_action_items`: Current parental to-dos (what to bring, wear, homework, permission slips).
-- `active_upcoming_dates`: Upcoming tests, holidays, early dismissals, project due dates, and calendar events.
-- `teacher_notes`: Recent (`<= 7` days) undigested Class Updates and direct teacher messages.
-- `classroom_highlights`: Recent undigested classroom photos/videos with attachment counts.
-- `expired_action_items`: Non-transient historical notices from earlier in the week.
+[`DigestEngine`](../../src/dojo/digest.py) transforms raw ClassDojo feed posts, Class Updates / teacher messages, and calendar events into a strictly daily-focused `Briefing` (`daily_focus=True` by default) containing:
+- `active_action_items`: Parental to-dos due **Today** or **Tomorrow**, plus any new action items announced within the last **24 hours**.
+- `active_upcoming_dates`: School calendar events and schedule changes happening **Today** or **Tomorrow**, plus any newly announced dates posted within the last **24 hours**.
+- `teacher_notes`: New (`<= 24` hours) Class Updates and direct teacher messages.
+- `classroom_highlights`: New (`<= 24` hours) classroom photos/videos with attachment counts.
+- Expired "Past Notices" are omitted from daily summaries, and [`dispatch_daily_briefing()`](../../src/dojo/mailer.py) skips sending email on quiet days when `briefing.is_empty()` is `True` (unless `force=True`). Broader MCP queries (`get_action_items`, `get_upcoming_dates`) pass `daily_focus=False`.
 
 ## Key Rules in `src/dojo/digest.py`
 
-### 1. Temporal Contextualization (`evaluate_item_temporal_status`)
-Teachers write relative dates (`"tomorrow"`, `"tonight"`, `"on Monday"`, `"next week"`). [`evaluate_item_temporal_status(text, post_dt, ref_dt, context_text)`](../../src/dojo/digest.py) resolves them against the post's timestamp (`post_dt`) and current time (`ref_dt`):
+### 1. Daily Focus & Temporal Contextualization (`evaluate_item_temporal_status`)
+Teachers write relative dates (`"tomorrow"`, `"tonight"`, `"on Monday"`, `"next week"`). [`evaluate_item_temporal_status(text, post_dt, ref_dt, context_text, daily_focus)`](../../src/dojo/digest.py) resolves them against the post's timestamp (`post_dt`) and current time (`ref_dt`):
 - **`"tomorrow"` / `"tmrw"`**:
   - `target_date = post_date + 1 day`
   - If `target_date == ref_date`: Rewrites summary to `"Today: ..."` (stripping `"tomorrow"`) and sets `urgency="high"`.
-  - If `target_date < ref_date`: Marks `is_expired=True` and `is_transient=True` so single-day reminders (like *"wear green tomorrow"*) disappear completely the day after the event.
+  - If `target_date < ref_date`: Marks `is_expired=True` and `is_transient=True` so single-day reminders disappear completely the day after the event.
+- **Announce Once → Quiet → Tomorrow → Today Lifecycle**:
+  - Future-dated posts (> Tomorrow, e.g. Friday's test posted Monday) surface once when newly posted (`<= 24h` & undigested), stay quiet mid-week once digested, and automatically resurface on the day before (`"Tomorrow (Friday): ..."`) and morning of (`"Today (Friday): ..."`, `urgency="high"`).
+  - Structured calendar events (`events`) surface strictly when `start_time` is **Today** or **Tomorrow** when `daily_focus=True`.
 - **Weekdays (`Monday`–`Sunday`) & `"Next Week"` Context**:
   - Multi-line posts (such as Class Updates listing `"Next week's tests:\nMonday: Sight word review test\nWednesday: Chapter 5 math test\nThursday: Spelling test"`) pass `context_text=body` into `evaluate_item_temporal_status`.
   - When `"next week"` appears in `text` or `context_text`, weekdays resolve to **next week's** Monday–Sunday (`days_to_next_monday + target_weekday`) rather than matching the current week's day.

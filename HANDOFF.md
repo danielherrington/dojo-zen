@@ -4,7 +4,7 @@
 **Repository:** `danielherrington/dojo-zen` (`main` branch)  
 **Production URL:** `https://dojo.herrington.ai` (Firebase Hosting `herrington-dojo.web.app` → Cloud Run `dojo-zen` in `us-central1`, GCP project `herrington-ai-site`)  
 **Remote MCP Endpoint:** `https://dojo.herrington.ai/mcp` (Streamable HTTP, unauthenticated)  
-**Linear Project:** [ClassDojo Anti-Bloat Agent](https://linear.app/herrington/project/classdojo-anti-bloat-agent-dab3a3988132) (`DAN-30` through `DAN-34` — all completed)
+**Linear Project:** **dojozen** ([`linear.app/herrington`](https://linear.app/herrington/project/classdojo-anti-bloat-agent-dab3a3988132) — `DAN-30` through `DAN-37`)
 
 ---
 
@@ -75,7 +75,7 @@ It connects directly to ClassDojo's internal web REST APIs, strips out promotion
 │   ├── cli.py                       # CLI entrypoints (login, sync, recap, run, serve, mcp, etc.)
 │   ├── templates/                   # Jinja2 email templates (email_digest.html, email_alert.html)
 │   └── web/index.html               # Mobile-friendly SPA (Ask Dojo, Today's Briefing, Class Feed)
-└── tests/                           # 53 unit & integration tests (zero external credentials needed)
+└── tests/                           # 56 unit & integration tests (zero external credentials needed)
 ```
 
 ---
@@ -91,9 +91,13 @@ It connects directly to ClassDojo's internal web REST APIs, strips out promotion
    - **Student & Classroom Roster**: Fetched from `GET /api/parent/{parentId}/student` via [`DojoClient.get_students()`](src/dojo/client.py) and persisted via [`sync_roster(client, db)`](src/dojo/client.py).
    - **Pinned Story Posts (`pinnedAt`)**: Story feed items with `pinnedAt` (such as Ms. Alonso's pinned *"Disguise a Turkey"* project) are automatically prefixed with `📌` in both SQLite and Firestore.
 
-2. **Relative Temporal Contextualization ([`src/dojo/digest.py`](src/dojo/digest.py))**:
+2. **Daily-Focused Horizon & Relative Temporal Contextualization ([`src/dojo/digest.py`](src/dojo/digest.py))**:
+   - Daily briefings (`daily_focus=True`) follow an **Announce Once → Quiet → Tomorrow → Today → Expire** lifecycle:
+     - Newly posted items (<24h & undigested) are announced once on the morning after they are posted.
+     - Items with explicit target dates resurface on **Tomorrow** (`"Tomorrow (Weekday): ..."`) and **Today** (`"Today (Weekday): ..."`, `urgency="high"`), then expire immediately afterward (no "Past Notices" section).
+     - Calendar events are included only when happening Today or Tomorrow; Teacher Messages and Classroom Highlights require `<24h` recency; quiet mornings skip sending email unless `force=True`.
    - [`evaluate_item_temporal_status(text, post_dt, ref_dt, context_text)`](src/dojo/digest.py) resolves relative time phrases against the post timestamp:
-     - `"tomorrow"` posted yesterday becomes `"Today: ..."` with `urgency="high"`, and expires (`is_expired=True`, `is_transient=True`) the day after the event so it disappears from both active and past notices.
+     - `"tomorrow"` posted yesterday becomes `"Today: ..."` with `urgency="high"`, and expires (`is_expired=True`, `is_transient=True`) the day after the event.
      - Multi-line posts (like weekly test schedules) are scanned line-by-line, passing `context_text=body` so weekday lines (`"Monday: ..."`, `"Wednesday: ..."`, `"Thursday: ..."`) inside a `"next week"` announcement resolve to **next week's** dates instead of matching the current week.
 
 3. **Attachment Classification ([`src/dojo/digest.py`](src/dojo/digest.py))**:
@@ -115,7 +119,7 @@ When you open this repository in a fresh **Cloud Project** (where gitignored fil
 uv sync
 uv run pytest
 ```
-*(All 53 unit and HTTP MCP tests run against temporary SQLite databases and mock HTTP transports—no credentials required.)*
+*(All 56 unit and HTTP MCP tests run against temporary SQLite databases and mock HTTP transports—no credentials required.)*
 
 ### Step 2: Verify GCP Authentication (`herrington-ai-site`)
 ```bash

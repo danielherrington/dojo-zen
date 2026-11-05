@@ -176,14 +176,14 @@
         <div class="all-clear">
           <div class="all-clear-icon">✨</div>
           <h3 style="margin: 0 0 6px 0; color: #1e293b;">All caught up!</h3>
-          <p style="margin: 0; font-size: 14px;">No new action items, messages, or deadlines.</p>
+          <p style="margin: 0; font-size: 14px;">Nothing due today or tomorrow, and no new updates in the last 24 hours.</p>
         </div>
       {% else %}
 
-        {# 1. Current / Active Action Items #}
+        {# 1. Today's Action Items #}
         {% if briefing.active_action_items %}
           <div class="section">
-            <div class="section-title title-action">📋 Action Items &amp; To-Dos</div>
+            <div class="section-title title-action">📋 Today's Action Items &amp; To-Dos</div>
             {% for item in briefing.active_action_items %}
               <div class="card {% if item.urgency == 'high' %}card-urgent{% else %}card-action{% endif %}">
                 <div class="item-title">
@@ -213,10 +213,10 @@
           </div>
         {% endif %}
 
-        {# 2. Upcoming Dates & Events #}
+        {# 2. Today & Tomorrow's Schedule #}
         {% if briefing.active_upcoming_dates %}
           <div class="section">
-            <div class="section-title title-dates">📅 Upcoming Dates &amp; Events</div>
+            <div class="section-title title-dates">📅 Today &amp; Tomorrow's Schedule</div>
             {% for d in briefing.active_upcoming_dates %}
               <div class="card card-date">
                 <div class="item-title">{{ d.title }}</div>
@@ -244,10 +244,10 @@
           </div>
         {% endif %}
 
-        {# 3. Teacher Messages #}
+        {# 3. New Teacher Messages (Last 24h) #}
         {% if briefing.teacher_notes %}
           <div class="section">
-            <div class="section-title title-messages">💬 Teacher Messages</div>
+            <div class="section-title title-messages">💬 New Teacher Messages (Last 24h)</div>
             {% for msg in briefing.teacher_notes %}
               <div class="card card-msg">
                 <div class="item-title">From: {{ msg.sender }}</div>
@@ -263,10 +263,10 @@
           </div>
         {% endif %}
 
-        {# 4. Classroom Highlights #}
+        {# 4. Today's Classroom Highlights (Last 24h) #}
         {% if briefing.classroom_highlights %}
           <div class="section">
-            <div class="section-title title-highlights">🌟 Classroom Highlights</div>
+            <div class="section-title title-highlights">🌟 Today's Classroom Highlights</div>
             {% for h in briefing.classroom_highlights[:5] %}
               <div class="card card-highlight">
                 <div class="item-title">{{ h.author }}</div>
@@ -300,37 +300,6 @@
                     <a href="{{ app_base_url }}/?item={{ h.item_id }}#item-{{ h.item_id }}" target="_blank" style="display: inline-block; background: #ede9fe; color: #7c3aed; font-weight: 600; font-size: 13px; padding: 8px 14px; border-radius: 6px; text-decoration: none; border: 1px solid #ddd6fe;">
                       🎥 Watch Video on DojoZen ↗
                     </a>
-                  </div>
-                {% endif %}
-              </div>
-            {% endfor %}
-          </div>
-        {% endif %}
-
-        {# 5. Expired / Past Notices from Earlier Days #}
-        {% if briefing.expired_action_items %}
-          <div class="section">
-            <div class="section-title title-past">📜 Past Notices (From earlier weeks)</div>
-            {% for item in briefing.expired_action_items[:6] %}
-              <div class="card card-past">
-                <div class="item-title">
-                  <span class="badge badge-past">PAST</span>
-                  {{ item.summary }}
-                </div>
-                <div class="item-meta">
-                  📅 Posted: {{ item.posted_at_str }}
-                  {% if item.author %} &bull; {{ item.author }}{% endif %}
-                  {% if item.item_id %}
-                    &bull; <a href="{{ app_base_url }}/?item={{ item.item_id }}#item-{{ item.item_id }}" target="_blank" style="color: #64748b; text-decoration: none; font-weight: 600;">View in DojoZen ↗</a>
-                  {% endif %}
-                </div>
-                {% if item.image_urls %}
-                  <div style="margin-top: 10px;">
-                    {% for img in item.image_urls %}
-                      <a href="{% if item.item_id %}{{ app_base_url }}/?item={{ item.item_id }}#item-{{ item.item_id }}{% else %}{{ img }}{% endif %}" target="_blank" style="display: block; margin-top: 8px; text-decoration: none;">
-                        <img src="{{ img }}" alt="Flyer / Attachment" style="max-width: 100%; height: auto; border-radius: 8px; display: block; border: 1px solid #cbd5e1;" />
-                      </a>
-                    {% endfor %}
                   </div>
                 {% endif %}
               </div>

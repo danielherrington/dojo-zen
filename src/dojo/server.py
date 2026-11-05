@@ -93,11 +93,18 @@ async def ask_question(req: AskRequest):
 async def get_briefing():
     """Fetch the latest live daily briefing without waiting for email."""
     feed_items = db.get_all_feed_items(limit=50)
-    messages = db.get_all_messages(limit=20)
+    messages = db.get_all_messages(limit=30)
     events = db.get_all_events()
     children = db.get_all_children()
 
-    briefing = digest_engine.synthesize(feed_items, messages, events, children)
+    briefing = digest_engine.synthesize(
+        feed_items,
+        messages,
+        events,
+        children,
+        daily_focus=True,
+        respect_digested=False,
+    )
 
     return {
         "briefing": {
@@ -106,7 +113,7 @@ async def get_briefing():
             "upcoming_dates": [d.model_dump() for d in briefing.active_upcoming_dates],
             "teacher_notes": [m.model_dump() for m in briefing.teacher_notes],
             "classroom_highlights": [h.model_dump() for h in briefing.classroom_highlights[:5]],
-            "expired_action_items": [e.model_dump() for e in briefing.expired_action_items[:6]],
+            "expired_action_items": [],
             "raw_item_count": briefing.raw_item_count,
             "filtered_bloat_count": briefing.filtered_bloat_count,
         }

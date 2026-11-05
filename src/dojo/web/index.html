@@ -897,9 +897,9 @@
 
         let html = '';
 
-        // 1. Action Items
+        // 1. Today's Action Items
         if (b.action_items && b.action_items.length > 0) {
-          html += `<h3 style="color: var(--urgent); margin: 16px 0 10px 0; font-size: 15px; letter-spacing: 0.02em;">🚨 ACTION ITEMS &amp; TO-DOS</h3>`;
+          html += `<h3 style="color: var(--urgent); margin: 16px 0 10px 0; font-size: 15px; letter-spacing: 0.02em;">🚨 TODAY'S ACTION ITEMS &amp; TO-DOS</h3>`;
           b.action_items.forEach(a => {
             const urgentBadge = a.urgency === 'high' ? `<span class="badge badge-urgent">URGENT</span>` : '';
             const imagesHtml = renderBriefingImages(a.image_urls, a.summary);
@@ -917,9 +917,9 @@
           });
         }
 
-        // 2. Upcoming Dates
+        // 2. Today & Tomorrow's Schedule
         if (b.upcoming_dates && b.upcoming_dates.length > 0) {
-          html += `<h3 style="color: var(--primary); margin: 22px 0 10px 0; font-size: 15px; letter-spacing: 0.02em;">📅 UPCOMING DATES &amp; EVENTS</h3>`;
+          html += `<h3 style="color: var(--primary); margin: 22px 0 10px 0; font-size: 15px; letter-spacing: 0.02em;">📅 TODAY &amp; TOMORROW'S SCHEDULE</h3>`;
           b.upcoming_dates.forEach(d => {
             const imagesHtml = renderBriefingImages(d.image_urls, d.title);
             html += `
@@ -937,9 +937,9 @@
           });
         }
 
-        // 3. Teacher Messages (Full Parity with Email Digest)
+        // 3. New Teacher Messages (Last 24h)
         if (b.teacher_notes && b.teacher_notes.length > 0) {
-          html += `<h3 style="color: #059669; margin: 22px 0 10px 0; font-size: 15px; letter-spacing: 0.02em;">💬 TEACHER MESSAGES</h3>`;
+          html += `<h3 style="color: #059669; margin: 22px 0 10px 0; font-size: 15px; letter-spacing: 0.02em;">💬 NEW TEACHER MESSAGES (LAST 24H)</h3>`;
           b.teacher_notes.forEach(m => {
             html += `
               <div class="card" style="border-left: 4px solid #10b981; background: #ecfdf5;">
@@ -955,9 +955,9 @@
           });
         }
 
-        // 4. Classroom Highlights
+        // 4. Today's Classroom Highlights (Last 24h)
         if (b.classroom_highlights && b.classroom_highlights.length > 0) {
-          html += `<h3 style="color: var(--accent); margin: 22px 0 10px 0; font-size: 15px; letter-spacing: 0.02em;">🌟 RECENT CLASSROOM HIGHLIGHTS</h3>`;
+          html += `<h3 style="color: var(--accent); margin: 22px 0 10px 0; font-size: 15px; letter-spacing: 0.02em;">🌟 TODAY'S CLASSROOM HIGHLIGHTS</h3>`;
           b.classroom_highlights.forEach(h => {
             const imagesHtml = renderBriefingImages(h.image_urls, h.author, h.video_urls);
             const metaBadge = h.attachment_label ? `&bull; ${escapeHtml(h.attachment_label)}` : (h.attachment_count ? `&bull; 📷 ${h.attachment_count} photo(s)` : '');
@@ -976,21 +976,14 @@
           });
         }
 
-        // 5. Past Notices
-        if (b.expired_action_items && b.expired_action_items.length > 0) {
-          html += `<h3 style="color: #64748b; margin: 24px 0 10px 0; font-size: 14px; letter-spacing: 0.02em;">📜 PAST NOTICES (From earlier weeks)</h3>`;
-          b.expired_action_items.forEach(p => {
-            html += `
-              <div class="card" style="border-left: 4px solid #94a3b8; opacity: 0.9;">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
-                  <div>
-                    <div class="card-title"><span class="badge badge-past">PAST</span>${escapeHtml(p.summary)}</div>
-                    <div class="card-meta">📅 Posted: ${escapeHtml(p.posted_at_str)} &bull; ${escapeHtml(p.author || '')}</div>
-                  </div>
-                  ${p.item_id ? `<button class="action-btn-sm" onclick="jumpToItem('${escapeHtml(p.item_id)}')">View in Feed ↗</button>` : ''}
-                </div>
-              </div>`;
-          });
+        const hasAnySection = (
+          (b.action_items && b.action_items.length > 0) ||
+          (b.upcoming_dates && b.upcoming_dates.length > 0) ||
+          (b.teacher_notes && b.teacher_notes.length > 0) ||
+          (b.classroom_highlights && b.classroom_highlights.length > 0)
+        );
+        if (!hasAnySection) {
+          html += `<p style="text-align: center; color: var(--text-muted); padding: 24px;">✨ All caught up for today! Nothing due today or tomorrow, and no new updates in the last 24 hours.</p>`;
         }
 
         // Summary footer
@@ -1002,7 +995,7 @@
             </div>`;
         }
 
-        container.innerHTML = html || '<p style="text-align: center; color: var(--text-muted); padding: 24px;">No current action items. All caught up!</p>';
+        container.innerHTML = html;
       } catch (e) {
         container.innerHTML = `<p style="color: var(--urgent); padding: 20px;">Failed to load briefing: ${e.message}</p>`;
       }

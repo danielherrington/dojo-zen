@@ -149,3 +149,84 @@ def test_mailer_digest_and_alert_links():
     assert "View Notice in DojoZen ↗" in alert_html
 
 
+def test_dispatch_daily_briefing_skips_quiet_day_and_surfaces_tomorrow_reminders(monkeypatch, tmp_path):
+    """Verify quiet days skip sending email (instead of emailing old history), while Today/Tomorrow deadlines from earlier days still send."""
+    from datetime import datetime, timezone
+    from dojo.db import DojoDatabase
+    from dojo.mailer import Mailer, dispatch_daily_briefing
+
+    db = DojoDatabase(tmp_path / "test_daily_dispatch.db")
+    custom_settings = Settings(
+        smtp_host="localhost",
+        smtp_user="test@example.com",
+        smtp_pass="password",
+        email_to="parent@example.com",
+    )
+
+    # Seed an already-digested Monday post announcing a Friday test + a far-future event + promotional bloat
+    db.upsert_feed_items([
+        {
+            "id": "mon_post_for_fri",
+            "author_name": "Ms. Alonso",
+            "content_text": "Reminder: Spelling test on Friday! Practice words.",
+            "item_timestamp": "2026-09-14T15:00:00Z",
+        },
+        {
+            "id": "bloat_post",
+            "author_name": "ClassDojo",
+            "content_text": "Try ClassDojo Plus free trial today!",
+            "item_timestamp": "2026-09-16T06:00:00Z",
+        },
+    ])
+    db.mark_items_digested(["mon_post_for_fri"], [], [])
+    db.upsert_events([
+        {
+            "id": "far_event",
+            "title": "Winter Concert",
+            "start_time": "2026-12-18",
+            "description": "Auditorium",
+        }
+    ])
+    db.mark_items_digested([], [], ["far_event"])
+
+    sent_subjects = []
+
+    def fake_send_digest(self, briefing, text_content, to_email=None):
+        sent_subjects.append(briefing.generated_at)
+        return True
+
+    monkeypatch.setattr(Mailer, "send_digest", fake_send_digest)
+
+    # 1. On Wednesday Sep 16 (nothing due Wed/Thu, only bloat arrived overnight) -> SKIPPED, bloat marked digested!
+    wed_res = dispatch_daily_briefing(
+        db=db,
+        settings=custom_settings,
+        force=False,
+        ref_dt=datetime(2026, 9, 16, 11, 0, tzinfo=timezone.utc),
+    )
+    assert wed_res["status"] == "skipped"
+    assert sent_subjects == []
+    assert db.get_stats()["undigested_items"] == 0
+
+    # 2. On Wednesday Sep 16 with force=True -> SENDS "All caught up" confirmation
+    forced_res = dispatch_daily_briefing(
+        db=db,
+        settings=custom_settings,
+        force=True,
+        ref_dt=datetime(2026, 9, 16, 11, 0, tzinfo=timezone.utc),
+    )
+    assert forced_res["status"] == "sent"
+    assert len(sent_subjects) == 1
+
+    # 3. On Thursday Sep 17 (even with 0 undigested items, Monday's post has Friday's test = Tomorrow!) -> SENDS!
+    thu_res = dispatch_daily_briefing(
+        db=db,
+        settings=custom_settings,
+        force=False,
+        ref_dt=datetime(2026, 9, 17, 11, 0, tzinfo=timezone.utc),
+    )
+    assert thu_res["status"] == "sent"
+    assert thu_res["item_count"] >= 1
+    assert len(sent_subjects) == 2
+
+

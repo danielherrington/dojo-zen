@@ -8,11 +8,11 @@ An autonomous parental assistant that monitors ClassDojo via direct REST API, st
 
 - **Direct REST API Client**: Connects directly to `home.classdojo.com/api/session` along with story feeds, Class Updates message threads, and school calendar endpoints with session cookie persistence.
 - **Two-Factor (OTC) & Browser Fallback**: Gracefully handles ClassDojo's email One-Time Code verification, with an optional Playwright helper (`dojo login --browser`) for interactive CAPTCHAs.
-- **Anti-Bloat Digest Engine**: Automatically filters out promotional spam (*ClassDojo Plus*, *Dojo Beyond*, monster clothing upsells) and isolates:
-  - 🚨 **Action Items & To-Dos**: What to bring, what to wear, permission slips, homework deadlines.
-  - 📅 **Upcoming Dates & Schedule**: Early dismissals, holidays, field trips, spirit days.
-  - 💬 **Teacher Messages & Class Updates**: Direct notes and pinned classroom broadcasts from teachers.
-  - 🌟 **Classroom Highlights**: Clean summaries of school activities without endless photo noise.
+- **Daily-Focused Anti-Bloat Digest Engine**: Automatically filters out promotional spam (*ClassDojo Plus*, *Dojo Beyond*, monster clothing upsells), skips sending emails on quiet days, and focuses strictly on what matters today:
+  - 🚨 **Today's Action Items & To-Dos**: Newly posted (<24h) logistics plus items due **Today** or **Tomorrow** (automatically resurfacing reminders posted earlier in the week).
+  - 📅 **Today & Tomorrow's Schedule**: Calendar events and school reminders happening today or tomorrow, plus newly announced dates.
+  - 💬 **New Teacher Messages (Last 24h)**: Direct notes and pinned classroom broadcasts sent within the past 24 hours.
+  - 🌟 **Today's Classroom Highlights**: Clean summaries of new (<24h) classroom activities without stale or historical feed noise.
 - **Gemini Multimodal Flyer OCR**: Scans attached school flyers and images (`dojo analyze-images`) to extract embedded dates and action items.
 - **Intelligent Real-Time Alerting**: Analyzes incoming messages so emergencies (illness/nurse visits, same-day bus delays, urgent calls requested) trigger an immediate priority email while routine posts wait for the morning recap.
 - **Family Web Portal & Q&A Assistant**: Mobile-friendly FastAPI portal (`dojo serve`, live at `https://dojo.herrington.ai`) with grounded natural-language Q&A and Twilio SMS/WhatsApp webhook support (`/api/sms/webhook`).
@@ -120,13 +120,14 @@ Dojo Zen exposes **8 tools** (`get_daily_briefing`, `get_action_items`, `get_upc
 
 ## 📋 Linear Project Tracking
 
-Tracked in Linear Project: [**ClassDojo Anti-Bloat Agent**](https://linear.app/herrington/project/classdojo-anti-bloat-agent-dab3a3988132)
+Tracked in Linear Project: **dojozen** ([`linear.app/herrington`](https://linear.app/herrington/project/classdojo-anti-bloat-agent-dab3a3988132))
 
 - [x] **[DAN-30]** Direct REST API Client & SQLite Ingestion
 - [x] **[DAN-31]** Anti-Bloat Daily Digest & Email Dispatcher
 - [x] **[DAN-32]** Real-Time Message Monitor & Intelligent Urgency Alerting
 - [x] **[DAN-33]** Web Portal & Natural Language Q&A Assistant for ClassDojo (Mobile-Friendly)
 - [x] **[DAN-34]** Model Context Protocol (MCP) Server for ClassDojo (Remote Streamable HTTP `/mcp` & Local Stdio)
+- [x] **[DAN-37]** Gemini Multimodal OCR for Image Attachments & Unblurred Feed Viewer
 
 ---
 
