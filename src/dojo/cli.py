@@ -10,7 +10,6 @@ from rich.panel import Panel
 from rich.table import Table
 
 from dojo.config import settings
-from dojo.db import DojoDatabase
 from dojo.client import DojoClient, TwoFactorRequiredError
 from dojo.db import DojoDatabase, get_database
 from dojo.digest import DigestEngine

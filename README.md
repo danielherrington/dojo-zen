@@ -1,22 +1,23 @@
-# 🎒 ClassDojo Anti-Bloat Agent & Daily Briefing
+# 🎒 Dojo Zen — ClassDojo Anti-Bloat Agent, Web Portal & MCP Server
 
-An autonomous agent that monitors ClassDojo via direct REST API, strips out the app bloat (marketing popups, monster avatars, gamification noise), stores posts, messages, and events in a local SQLite database, and delivers a clean, high-signal briefing directly to your email inbox.
+An autonomous parental assistant that monitors ClassDojo via direct REST API, strips out the app bloat (marketing popups, monster avatars, gamification noise), extracts flyer text with Gemini Multimodal OCR, and delivers high-signal school logistics via email briefings, a mobile-friendly web portal, and a remote Model Context Protocol (MCP) server.
 
 ---
 
 ## ⚡ Features
 
-- **Direct REST API Client**: Connects directly to `home.classdojo.com/api/session` and story/message feeds with session cookie persistence.
-- **Two-Factor (OTC) Ready**: Gracefully handles ClassDojo's One-Time Code email verification.
-- **Interactive Browser Fallback**: Optional Playwright helper (`dojo login --browser`) if ClassDojo ever triggers interactive CAPTCHAs or Cloudflare verification.
+- **Direct REST API Client**: Connects directly to `home.classdojo.com/api/session` along with story feeds, Class Updates message threads, and school calendar endpoints with session cookie persistence.
+- **Two-Factor (OTC) & Browser Fallback**: Gracefully handles ClassDojo's email One-Time Code verification, with an optional Playwright helper (`dojo login --browser`) for interactive CAPTCHAs.
 - **Anti-Bloat Digest Engine**: Automatically filters out promotional spam (*ClassDojo Plus*, *Dojo Beyond*, monster clothing upsells) and isolates:
   - 🚨 **Action Items & To-Dos**: What to bring, what to wear, permission slips, homework deadlines.
   - 📅 **Upcoming Dates & Schedule**: Early dismissals, holidays, field trips, spirit days.
-  - 💬 **Teacher Messages**: Direct notes from classroom teachers.
+  - 💬 **Teacher Messages & Class Updates**: Direct notes and pinned classroom broadcasts from teachers.
   - 🌟 **Classroom Highlights**: Clean summaries of school activities without endless photo noise.
-- **Intelligent Real-Time Alerting**: A background monitor analyzes every message as it arrives. Emergencies (illness/nurse visits, same-day bus delays, urgent calls requested) dispatch an immediate high-priority alert email, while routine announcements are held for the daily morning recap.
-- **Email Delivery**: Sends mobile-optimized HTML + plain text email briefings and emergency alerts via standard SMTP (Gmail App Password, iCloud, etc.).
-- **Local SQLite Store**: Retains historical records in `data/dojo.db`, ready for future Telegram bots, local search, or MCP servers.
+- **Gemini Multimodal Flyer OCR**: Scans attached school flyers and images (`dojo analyze-images`) to extract embedded dates and action items.
+- **Intelligent Real-Time Alerting**: Analyzes incoming messages so emergencies (illness/nurse visits, same-day bus delays, urgent calls requested) trigger an immediate priority email while routine posts wait for the morning recap.
+- **Family Web Portal & Q&A Assistant**: Mobile-friendly FastAPI portal (`dojo serve`, live at `https://dojo.herrington.ai`) with grounded natural-language Q&A and Twilio SMS/WhatsApp webhook support (`/api/sms/webhook`).
+- **Model Context Protocol (MCP) Server**: Exposes classroom announcements, action items, upcoming dates, and grounded Q&A over both remote Streamable HTTP (`/mcp`) and local `stdio` (`dojo mcp`).
+- **Dual Storage Parity**: Uses local SQLite (`data/dojo.db`) for CLI/local development and Google Cloud Firestore (`USE_FIRESTORE=true`) in Cloud Run production.
 
 ---
 
@@ -39,6 +40,9 @@ Edit `.env` with your details:
 DOJO_EMAIL=your-email@example.com
 DOJO_PASSWORD=your-password
 
+# Optional: Gemini API Key (for Multimodal Flyer OCR & LLM Q&A synthesis)
+GEMINI_API_KEY=your-gemini-api-key
+
 # Email Dispatcher (e.g. Gmail with an App Password)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
@@ -51,25 +55,25 @@ EMAIL_TO=your-inbox@example.com
 ### 3. Log In to ClassDojo
 ```bash
 # Direct API Login (will prompt for 6-digit OTC code if 2FA is active)
-uv run python -m dojo login
+uv run dojo login
 
 # Or if you encounter a CAPTCHA:
-uv run python -m dojo login --browser
+uv run dojo login --browser
 ```
 
 ### 4. Sync & Generate Your First Briefing
 ```bash
 # Check current system status
-uv run python -m dojo status
+uv run dojo status
 
-# Fetch new stories, messages, and events into SQLite
-uv run python -m dojo sync
+# Fetch new stories, Class Updates, messages, and events
+uv run dojo sync
 
 # Preview your briefing in the terminal and generate HTML preview
-uv run python -m dojo recap --dry-run --force
+uv run dojo recap --dry-run --force
 
 # Send the briefing to your inbox
-uv run python -m dojo recap --send-email
+uv run dojo recap --send-email
 ```
 
 ---
@@ -80,15 +84,37 @@ uv run python -m dojo recap --send-email
 | :--- | :--- |
 | `dojo login` | Authenticate directly to ClassDojo API and save session cookies |
 | `dojo login --browser` | Launch Playwright browser window to log in interactively and save cookies |
-| `dojo sync [--limit 50]` | Fetch latest stories, messages, and events into SQLite |
+| `dojo sync [--limit 50]` | Fetch latest stories, Class Updates, messages, and events |
+| `dojo analyze-images [--limit 10]` | Scan feed image attachments & flyers using Gemini Multimodal OCR |
 | `dojo recap` | Synthesize un-digested items into a clean briefing |
-| `dojo recap --dry-run` | Preview recap without marking items as digested in SQLite |
+| `dojo recap --dry-run` | Preview recap without marking items as digested |
 | `dojo recap --send-email` | Dispatch briefing to your email inbox and mark items digested |
 | `dojo run` | One-shot command: Syncs from ClassDojo and emails digest if new items exist |
 | `dojo check-alerts` | One-shot check: Evaluates newly arrived messages and sends immediate priority alerts if urgent |
 | `dojo watch [--interval 300]` | Continuous monitoring daemon polling ClassDojo in real-time |
-| `dojo serve [--port 8000]` | Launch the family web portal & Q&A assistant (accessible on phones/tablets) |
+| `dojo serve [--port 8000]` | Launch the family web portal, Q&A assistant, and HTTP `/mcp` server |
+| `dojo mcp [--transport stdio]` | Run the Model Context Protocol (MCP) server over `stdio` or `sse` |
+| `dojo seed-firestore` | Migrate local SQLite data and session cookies to Google Cloud Firestore |
 | `dojo status` | View session health, student counts, and database stats |
+
+---
+
+## 🔌 Model Context Protocol (MCP) Server
+
+Dojo Zen exposes **8 tools** (`get_daily_briefing`, `get_action_items`, `get_upcoming_dates`, `ask_classroom_assistant`, `search_feed`, `get_recent_feed`, `get_feed_item`, `get_enrolled_children`), **4 resources** (`dojo://briefing/today`, `dojo://action-items`, `dojo://calendar/upcoming`, `dojo://feed/recent`), and **2 prompts** (`weekly-school-prep`, `urgent-logistics-check`).
+
+- **Remote Streamable HTTP**: Connect any MCP client to `https://dojo.herrington.ai/mcp` (or `http://localhost:8000/mcp` when running `dojo serve`).
+- **Local `stdio`**:
+  ```json
+  {
+    "mcpServers": {
+      "dojo-zen": {
+        "command": "uv",
+        "args": ["--directory", "/path/to/dojo-zen", "run", "dojo", "mcp"]
+      }
+    }
+  }
+  ```
 
 ---
 
@@ -106,33 +132,26 @@ Tracked in Linear Project: [**ClassDojo Anti-Bloat Agent**](https://linear.app/h
 
 ## ⏰ Automated Daily Scheduling
 
-To receive a briefing every morning (e.g. 7:00 AM) automatically, add a cron job:
+In production on Google Cloud Run (`dojo-zen`), Cloud Scheduler triggers `/api/cron/sync` and `/api/cron/daily-briefing` automatically. To run locally via cron on a weekday schedule:
 
 ```bash
 # Open crontab editor
 crontab -e
 
 # Run every weekday at 7:00 AM
-0 7 * * 1-5 cd /path/to/serene-turing && uv run python -m dojo run >> /tmp/dojo.log 2>&1
+0 7 * * 1-5 cd /path/to/dojo-zen && uv run dojo run >> /tmp/dojo.log 2>&1
 ```
 
 ---
 
-## 🗄️ Database Schema (`data/dojo.db`)
+## 🗄️ Storage Schema (SQLite & Cloud Firestore)
 
-All data is stored in SQLite for durability and future integration:
+Data is stored locally in `data/dojo.db` (SQLite) or in Google Cloud Firestore when `USE_FIRESTORE=true`:
 
-- **`children`**: `id`, `name`, `grade`, `avatar_url`, `updated_at`
-- **`classes`**: `id`, `name`, `teacher_name`, `child_id`, `updated_at`
-- **`feed_items`**: `id`, `story_id`, `class_id`, `author_name`, `content_text`, `attachments_json`, `item_timestamp`, `digested_at`
-- **`messages`**: `id`, `conversation_id`, `sender_name`, `body`, `message_timestamp`, `digested_at`
-- **`events`**: `id`, `title`, `description`, `start_time`, `end_time`, `digested_at`
-- **`digests`**: `id`, `created_at`, `content_html`, `content_text`, `recipient_email`, `sent_status`
-
----
-
-## 🔮 Future Extensions
-
-Because all data is structured in SQLite, you can easily build on top of this foundation:
-1. **Telegram Bot**: Query upcoming events or receive instant notifications when a teacher messages.
-2. **MCP Server**: Connect this SQLite database as a Model Context Protocol tool so any AI assistant can answer *"What does Leo need for school tomorrow?"*.
+- **`children` / `dojo_children`**: `id`, `name`, `grade`, `avatar_url`, `updated_at`
+- **`classes` / `dojo_classes`**: `id`, `name`, `teacher_name`, `child_id`, `updated_at`
+- **`feed_items` / `dojo_feed_items`**: `id`, `story_id`, `class_id`, `author_name`, `content_text`, `attachments_json`, `ocr_json`, `item_timestamp`, `digested_at`
+- **`messages` / `dojo_messages`**: `id`, `conversation_id`, `sender_name`, `body`, `message_timestamp`, `digested_at`
+- **`events` / `dojo_events`**: `id`, `title`, `description`, `start_time`, `end_time`, `digested_at`
+- **`digests` / `dojo_digests`**: `id`, `created_at`, `content_html`, `content_text`, `recipient_email`, `sent_status`
+- **`alerts` / `dojo_alerts`** & **`dojo_config/session`** (Firestore): Urgent alert audit log and persisted ClassDojo session cookies.

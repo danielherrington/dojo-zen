@@ -10,7 +10,7 @@ This repository powers **Dojo Zen** (`danielherrington/dojo-zen`), an autonomous
 
 1. **Backwards-Compatible Public MCP Surface (`/mcp` & `stdio`)**:
    - Never break the remote Streamable HTTP MCP server mounted at `/mcp` in [`src/dojo/server.py`](src/dojo/server.py) or local `stdio` transport in [`src/dojo/mcp_server.py`](src/dojo/mcp_server.py).
-   - Keep all 7 MCP tools (`get_daily_briefing`, `get_action_items`, `get_upcoming_dates`, `ask_classroom_assistant`, `search_feed`, `get_recent_feed`, `get_feed_item`, `get_enrolled_children`), 4 MCP resources (`dojo://briefing/today`, `dojo://action-items`, `dojo://calendar/upcoming`, `dojo://feed/recent`), and 2 MCP prompts (`weekly-school-prep`, `urgent-logistics-check`) intact.
+   - Keep all 8 MCP tools (`get_daily_briefing`, `get_action_items`, `get_upcoming_dates`, `ask_classroom_assistant`, `search_feed`, `get_recent_feed`, `get_feed_item`, `get_enrolled_children`), 4 MCP resources (`dojo://briefing/today`, `dojo://action-items`, `dojo://calendar/upcoming`, `dojo://feed/recent`), and 2 MCP prompts (`weekly-school-prep`, `urgent-logistics-check`) intact.
 2. **Dual Storage Parity (Cloud Firestore in Production + SQLite Locally)**:
    - Production Cloud Run (`USE_FIRESTORE=true`, GCP project `herrington-ai-site`) reads and writes exclusively to **Google Cloud Firestore** (`dojo_children`, `dojo_classes`, `dojo_feed_items`, `dojo_messages`, `dojo_events`, `dojo_digests`, `dojo_alerts`, and `dojo_config/session`) via [`src/dojo/firestore_db.py`](src/dojo/firestore_db.py).
    - Local CLI & unit tests default to SQLite (`data/dojo.db`) via [`src/dojo/db.py`](src/dojo/db.py).
