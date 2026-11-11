@@ -2,6 +2,8 @@
 
 This repository powers **Dojo Zen** (`danielherrington/dojo-zen`), an autonomous ClassDojo anti-bloat parental assistant, Daily Briefing & Emergency Alert engine, Gemini Multimodal OCR flyer scanner, mobile-friendly Web Portal, and remote Streamable HTTP MCP Server deployed at `https://dojo.herrington.ai`.
 
+> **Incoming Agents:** Read [`HANDOFF.md`](HANDOFF.md) first for the full architectural overview, recent fixes, Cloud Project workflow, and operational runbook.
+
 ---
 
 ## 1. Non-Negotiable Architecture & Guardrails
