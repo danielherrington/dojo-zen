@@ -87,3 +87,30 @@ def test_cron_authorized_bearer_header(client, monkeypatch):
     )
     assert res.status_code == 200
     assert res.json()["status"] == "ok"
+
+
+def test_cron_check_alerts_reports_failed_sends(client, monkeypatch):
+    """A failed emergency send is reported separately, not counted as sent (DAN-163)."""
+    from dojo.config import settings
+    from dojo.alert_evaluator import AlertDecision, UrgencyLevel
+    monkeypatch.setattr(settings, "cron_secret", "test-secret-123")
+
+    def decision(item_id, status):
+        return AlertDecision(
+            item_id=item_id, item_type="message", sender_or_author="Nurse", title="t",
+            body="fever", urgency=UrgencyLevel.IMMEDIATE, reason="r", delivery_status=status,
+        )
+
+    class MockMonitor:
+        def __init__(self, *args, **kwargs): pass
+        def check_once(self, *args, **kwargs):
+            return [decision("a", "sent"), decision("b", "failed: SMTP down")]
+
+    monkeypatch.setattr("dojo.client.DojoClient.is_authenticated", lambda self: True)
+    monkeypatch.setattr("dojo.monitor.MessageMonitor", MockMonitor)
+
+    res = client.post("/api/cron/check-alerts?secret=test-secret-123")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["urgent_alerts_sent"] == 1
+    assert body["urgent_alerts_failed"] == 1

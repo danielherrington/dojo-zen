@@ -436,13 +436,19 @@ async def cron_check_alerts(
         alerts = monitor.check_once(send_email=True)
         if isinstance(alerts, list):
             serialized_alerts = [a.model_dump() if hasattr(a, "model_dump") else str(a) for a in alerts]
-            urgent_count = len(alerts)
+            statuses = [getattr(a, "delivery_status", None) or "" for a in alerts]
+            failed_count = sum(1 for st in statuses if st.startswith("failed"))
+            urgent_count = len(alerts) - failed_count
         else:
             serialized_alerts = []
             urgent_count = 0
+            failed_count = 0
+        if failed_count:
+            logger.error(f"{failed_count} urgent alert(s) failed to send; they will be retried on the next check.")
         return {
             "status": "ok",
             "urgent_alerts_sent": urgent_count,
+            "urgent_alerts_failed": failed_count,
             "alerts": serialized_alerts
         }
     except Exception as e:

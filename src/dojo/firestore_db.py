@@ -372,6 +372,10 @@ class FirestoreDojoDatabase:
     ) -> int:
         now = utc_now_iso()
         doc_ref = self.alert_col.document(str(item_id))
+        existing = doc_ref.get()
+        prior_attempts = 0
+        if existing.exists:
+            prior_attempts = int((existing.to_dict() or {}).get("attempts") or 1)
         doc_ref.set({
             "item_id": str(item_id),
             "item_type": item_type,
@@ -382,8 +386,41 @@ class FirestoreDojoDatabase:
             "sent_at": now,
             "recipient_email": recipient_email,
             "sent_status": sent_status,
+            "attempts": prior_attempts + 1,
         }, merge=True)
         return 1
+
+    def get_failed_alerts(self, max_attempts: int = 5) -> Dict[str, List[Dict[str, Any]]]:
+        """Fetch messages and feed items whose immediate alert failed to send and may be retried."""
+        messages: List[Dict[str, Any]] = []
+        feed_items: List[Dict[str, Any]] = []
+        for snap in self.alert_col.stream():
+            alert = snap.to_dict() or {}
+            if alert.get("urgency_level") != "immediate":
+                continue
+            if not str(alert.get("sent_status") or "").startswith("failed"):
+                continue
+            attempts = int(alert.get("attempts") or 1)
+            if attempts >= max_attempts:
+                continue
+            item_id = str(alert.get("item_id") or snap.id)
+            col = self.msg_col if alert.get("item_type") == "message" else self.feed_col
+            item_snap = col.document(item_id).get()
+            if not item_snap.exists:
+                continue
+            item = dict(item_snap.to_dict() or {})
+            item.setdefault("id", item_id)
+            item["alert_attempts"] = attempts
+            (messages if alert.get("item_type") == "message" else feed_items).append(item)
+
+        messages.sort(key=lambda x: x.get("message_timestamp") or "", reverse=True)
+        feed_items.sort(key=lambda x: x.get("item_timestamp") or "", reverse=True)
+        return {"messages": messages, "feed_items": feed_items}
+
+    def get_alert(self, item_id: str) -> Optional[Dict[str, Any]]:
+        """Return the alert audit record for an item, if any."""
+        snap = self.alert_col.document(str(item_id)).get()
+        return snap.to_dict() if snap.exists else None
 
     def get_unalerted_items(self) -> Dict[str, List[Dict[str, Any]]]:
         alert_docs = self.alert_col.stream()
