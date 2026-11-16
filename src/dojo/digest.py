@@ -5,6 +5,8 @@ from datetime import datetime, timezone, date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field, computed_field
 
+from dojo.tz import family_now, family_tz, to_family_tz
+
 # Patterns indicative of ClassDojo marketing, avatar dressing, or gamification bloat
 BLOAT_PATTERNS = [
     r"classdojo plus",
@@ -65,20 +67,21 @@ def parse_raw_datetime(raw_time: Any) -> Optional[datetime]:
     if not raw_time:
         return None
     if isinstance(raw_time, datetime):
-        return raw_time.astimezone() if raw_time.tzinfo else raw_time.replace(tzinfo=timezone.utc).astimezone()
+        return to_family_tz(raw_time)
     if isinstance(raw_time, date):
-        return datetime(raw_time.year, raw_time.month, raw_time.day).astimezone()
+        return datetime(raw_time.year, raw_time.month, raw_time.day, tzinfo=family_tz())
     s = str(raw_time).strip()
     try:
         clean = s.replace("Z", "+00:00")
         dt = datetime.fromisoformat(clean)
-        return dt.astimezone()
+        # Naive ISO strings are wall-clock values (e.g. calendar times) on the family's clock.
+        return to_family_tz(dt, naive_tz=family_tz())
     except Exception:
         pass
     match = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})", s)
     if match:
         try:
-            return datetime(int(match.group(1)), int(match.group(2)), int(match.group(3))).astimezone()
+            return datetime(int(match.group(1)), int(match.group(2)), int(match.group(3)), tzinfo=family_tz())
         except Exception:
             pass
     return None
@@ -93,7 +96,7 @@ def parse_date_or_datetime(val: Any, default_year: Optional[int] = None) -> Opti
     if isinstance(val, date):
         return val
     s = str(val).strip()
-    fallback_year = default_year or datetime.now().year
+    fallback_year = default_year or family_now().year
     try:
         clean = s.replace("Z", "+00:00")
         return datetime.fromisoformat(clean).date()
@@ -134,10 +137,10 @@ def parse_date_or_datetime(val: Any, default_year: Optional[int] = None) -> Opti
 
 def is_posted_within_24h(post_dt: Optional[datetime], ref_dt: Optional[datetime] = None) -> bool:
     """Return True if post_dt is within the preceding 24h (or posted Friday–Sunday when evaluating Sunday evening's week-ahead briefing)."""
-    if ref_dt is None:
-        ref_dt = datetime.now().astimezone()
+    ref_dt = to_family_tz(ref_dt, naive_tz=family_tz()) if ref_dt is not None else family_now()
     if post_dt is None:
         return True
+    post_dt = to_family_tz(post_dt, naive_tz=family_tz())
     if post_dt.date() == ref_dt.date():
         return True
     if ref_dt.weekday() == 6 and ref_dt.hour >= 16:
@@ -191,10 +194,10 @@ def evaluate_item_temporal_status(
     Evaluates relative time expressions in text relative to post_dt and ref_dt.
     Detects tomorrow, tonight, today, weekends, days of week, explicit dates, and undated posts.
     """
-    if ref_dt is None:
-        ref_dt = datetime.now().astimezone()
+    ref_dt = to_family_tz(ref_dt, naive_tz=family_tz()) if ref_dt is not None else family_now()
     if post_dt is None:
         post_dt = ref_dt
+    post_dt = to_family_tz(post_dt, naive_tz=family_tz())
 
     post_date = post_dt.date()
     ref_date = ref_dt.date()
@@ -549,9 +552,9 @@ def parse_and_format_timestamp(raw_time: Optional[str], ref_dt: Optional[datetim
     try:
         clean_time = raw_time.replace("Z", "+00:00")
         utc_dt = datetime.fromisoformat(clean_time)
-        # Convert UTC to local timezone
-        local_dt = utc_dt.astimezone()
-        now = ref_dt.astimezone() if ref_dt is not None else datetime.now().astimezone()
+        # Convert UTC to the family's wall clock (Cloud Run runs in UTC)
+        local_dt = to_family_tz(utc_dt)
+        now = to_family_tz(ref_dt, naive_tz=family_tz()) if ref_dt is not None else family_now()
         delta = now - local_dt
 
         # Handle future timestamps or small clock skews
@@ -694,8 +697,8 @@ class ClassroomHighlight(BaseModel):
 
 
 class Briefing(BaseModel):
-    generated_at: str = Field(default_factory=lambda: datetime.now().astimezone().strftime("%A, %b %d, %Y"))
-    period: str = Field(default_factory=lambda: "Morning" if datetime.now().astimezone().hour < 12 else "Evening")
+    generated_at: str = Field(default_factory=lambda: family_now().strftime("%A, %b %d, %Y"))
+    period: str = Field(default_factory=lambda: "Morning" if family_now().hour < 12 else "Evening")
     children_names: List[str] = Field(default_factory=list)
     action_items: List[ActionItem] = Field(default_factory=list)
     upcoming_dates: List[UpcomingDate] = Field(default_factory=list)
@@ -778,8 +781,7 @@ class DigestEngine:
         When daily_focus=True (default), strictly surfaces items relevant to Today + Tomorrow
         plus new updates posted within the last 24 hours, omitting expired Past Notices.
         """
-        if ref_dt is None:
-            ref_dt = datetime.now().astimezone()
+        ref_dt = to_family_tz(ref_dt, naive_tz=family_tz()) if ref_dt is not None else family_now()
         ref_date = ref_dt.date()
         tomorrow_date = ref_date + timedelta(days=1)
 
@@ -1134,7 +1136,7 @@ class DigestEngine:
             return
 
         img_urls = [ocr["image_url"]] if (include_images and ocr.get("image_url")) else []
-        effective_ref = ref_dt if ref_dt is not None else datetime.now().astimezone()
+        effective_ref = to_family_tz(ref_dt, naive_tz=family_tz()) if ref_dt is not None else family_now()
         ref_date = effective_ref.date()
         tomorrow_date = ref_date + timedelta(days=1)
         is_fresh_post = is_posted_within_24h(item_dt, effective_ref)

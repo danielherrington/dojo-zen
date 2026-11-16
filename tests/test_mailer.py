@@ -249,7 +249,10 @@ def test_weekend_schedule_skips_saturday_and_sunday_morning_targets_sunday_night
     - Sunday night (>= 4:00 PM): send first briefing of the week covering Friday/weekend updates + Monday schedule.
     - Monday morning: skip if Sunday night already covered Monday's items and nothing new arrived overnight.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    ET = ZoneInfo("America/New_York")  # wall-clock times below are the family's (DAN-165)
     from dojo.db import DojoDatabase
     from dojo.mailer import Mailer, dispatch_daily_briefing
 
@@ -292,7 +295,7 @@ def test_weekend_schedule_skips_saturday_and_sunday_morning_targets_sunday_night
         db=db,
         settings=custom_settings,
         force=False,
-        ref_dt=datetime(2026, 9, 19, 7, 0, tzinfo=timezone.utc),
+        ref_dt=datetime(2026, 9, 19, 7, 0, tzinfo=ET),
     )
     assert sat_am["status"] == "skipped"
     assert "saturday" in sat_am["reason"].lower()
@@ -304,7 +307,7 @@ def test_weekend_schedule_skips_saturday_and_sunday_morning_targets_sunday_night
         db=db,
         settings=custom_settings,
         force=False,
-        ref_dt=datetime(2026, 9, 19, 18, 0, tzinfo=timezone.utc),
+        ref_dt=datetime(2026, 9, 19, 18, 0, tzinfo=ET),
     )
     assert sat_pm["status"] == "skipped"
     assert "saturday" in sat_pm["reason"].lower()
@@ -316,7 +319,7 @@ def test_weekend_schedule_skips_saturday_and_sunday_morning_targets_sunday_night
         db=db,
         settings=custom_settings,
         force=False,
-        ref_dt=datetime(2026, 9, 20, 7, 0, tzinfo=timezone.utc),
+        ref_dt=datetime(2026, 9, 20, 7, 0, tzinfo=ET),
     )
     assert sun_am["status"] == "skipped"
     assert "sunday morning" in sun_am["reason"].lower()
@@ -328,7 +331,7 @@ def test_weekend_schedule_skips_saturday_and_sunday_morning_targets_sunday_night
         db=db,
         settings=custom_settings,
         force=False,
-        ref_dt=datetime(2026, 9, 20, 18, 0, tzinfo=timezone.utc),
+        ref_dt=datetime(2026, 9, 20, 18, 0, tzinfo=ET),
     )
     assert sun_pm["status"] == "sent"
     assert len(dispatched) == 1
@@ -344,7 +347,7 @@ def test_weekend_schedule_skips_saturday_and_sunday_morning_targets_sunday_night
         db=db,
         settings=custom_settings,
         force=False,
-        ref_dt=datetime(2026, 9, 21, 7, 0, tzinfo=timezone.utc),
+        ref_dt=datetime(2026, 9, 21, 7, 0, tzinfo=ET),
     )
     assert mon_am["status"] == "skipped"
     assert "sunday evening" in mon_am["reason"].lower()

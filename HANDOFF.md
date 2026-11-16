@@ -101,6 +101,8 @@ It connects directly to ClassDojo's internal web REST APIs, strips out promotion
      - `"tomorrow"` posted yesterday becomes `"Today: ..."` with `urgency="high"`, and expires (`is_expired=True`, `is_transient=True`) the day after the event.
      - Multi-line posts (like weekly test schedules) are scanned line-by-line, passing `context_text=body` so weekday lines (`"Monday: ..."`, `"Wednesday: ..."`, `"Thursday: ..."`) inside a `"next week"` announcement resolve to **next week's** dates instead of matching the current week.
 
+   - **Family timezone (DAN-165):** Cloud Run runs in UTC, so all wall-clock maths (Today/Tomorrow, <24h, Morning/Evening, weekend send window, Q&A recency) goes through [`src/dojo/tz.py`](src/dojo/tz.py) (`family_now()`, `to_family_tz()`), driven by `DIGEST_TIMEZONE` (default `America/New_York`). Never call bare `.astimezone()` or `datetime.now()` for family dates. `tzdata` is a dependency so `zoneinfo` works in the slim image.
+
 3. **Attachment Classification ([`src/dojo/digest.py`](src/dojo/digest.py))**:
    - [`classify_attachment()`](src/dojo/digest.py) separates photos, videos (`.mp4`, `.mov`), and files (`.pdf`).
    - Videos use `thumbnailPath` (valid JPEG poster frame) for `image_urls` and put the `.mp4` URL in `video_urls` so `<img>` tags in emails and the Web Portal never break.
