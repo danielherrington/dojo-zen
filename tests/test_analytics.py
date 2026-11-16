@@ -25,6 +25,14 @@ BASE = "https://dojo.example.test"
 NOW = datetime(2026, 11, 16, 20, 0, tzinfo=timezone.utc)
 
 
+@pytest.fixture(autouse=True)
+def _long_retention(monkeypatch):
+    """These tests seed fixed 2026 dates; keep retention (DAN-205) from purging them as the real clock moves."""
+    from dojo.config import settings
+    monkeypatch.setattr(settings, "analytics_retention_days", 36500)
+    monkeypatch.setattr(settings, "usage_retention_days", 36500)
+
+
 @pytest.fixture
 def db():
     with tempfile.TemporaryDirectory() as tmpdir:

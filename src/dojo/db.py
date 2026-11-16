@@ -538,6 +538,7 @@ class DojoDatabase:
                 (email_id, kind, subject, recipient_count, item_count, sent_at),
             )
             conn.commit()
+        self.purge_expired_analytics()
 
     def record_email_event(
         self, email_id: str, event_type: str, target: Optional[str] = None,
@@ -559,8 +560,20 @@ class DojoDatabase:
             )
             conn.commit()
 
+    def purge_expired_analytics(self, now: Optional[Any] = None) -> Dict[str, int]:
+        """Delete analytics rows past retention (DAN-205). SQLite's stand-in for Firestore's TTL policy."""
+        from dojo.analytics import retention_cutoffs
+        cut = retention_cutoffs(now)
+        with self.get_connection() as conn:
+            sends = conn.execute("DELETE FROM email_sends WHERE sent_at < ?", (cut["events_before"],)).rowcount
+            events = conn.execute("DELETE FROM email_events WHERE created_at < ?", (cut["events_before"],)).rowcount
+            usage = conn.execute("DELETE FROM usage_daily WHERE day < ?", (cut["usage_before_day"],)).rowcount
+            conn.commit()
+        return {"email_sends": sends, "email_events": events, "usage_daily": usage}
+
     def get_analytics_rows(self, since_iso: str, since_day: str) -> Dict[str, List[Dict[str, Any]]]:
         """Raw sends, events and per-day usage since the given instant/day (summarised in dojo.analytics)."""
+        self.purge_expired_analytics()
         with self.get_connection() as conn:
             sends = [dict(r) for r in conn.execute(
                 "SELECT * FROM email_sends WHERE sent_at >= ?", (since_iso,))]

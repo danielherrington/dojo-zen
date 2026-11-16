@@ -12,6 +12,15 @@ if _env_file.exists():
     load_dotenv(dotenv_path=_env_file)
 
 
+def _positive_int(name: str, default: int) -> int:
+    """Read a positive integer env var, falling back to the default if it's unset or invalid."""
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
 class Settings(BaseModel):
     # ClassDojo
     dojo_email: str = Field(default_factory=lambda: os.getenv("DOJO_EMAIL", ""))
@@ -82,6 +91,15 @@ class Settings(BaseModel):
     )
     usage_analytics: bool = Field(
         default_factory=lambda: os.getenv("USAGE_ANALYTICS", "true").lower() in ("true", "1", "yes")
+    )
+
+    # Retention (DAN-205). Per-event tracking rows (email sends, opens, clicks) are deleted after
+    # ANALYTICS_RETENTION_DAYS; the aggregate daily usage counters after USAGE_RETENTION_DAYS.
+    analytics_retention_days: int = Field(
+        default_factory=lambda: _positive_int("ANALYTICS_RETENTION_DAYS", 90)
+    )
+    usage_retention_days: int = Field(
+        default_factory=lambda: _positive_int("USAGE_RETENTION_DAYS", 400)
     )
 
     def ensure_directories(self) -> None:

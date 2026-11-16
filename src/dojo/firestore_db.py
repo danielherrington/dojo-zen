@@ -371,6 +371,7 @@ class FirestoreDojoDatabase:
     def record_email_send(
         self, email_id: str, kind: str, subject: str, recipient_count: int, item_count: int, sent_at: str
     ) -> None:
+        from dojo.analytics import EXPIRE_FIELD, event_retention_days, expire_at
         self.email_send_col.document(email_id).set({
             "email_id": email_id,
             "kind": kind,
@@ -378,33 +379,84 @@ class FirestoreDojoDatabase:
             "recipient_count": recipient_count,
             "item_count": item_count,
             "sent_at": sent_at,
+            EXPIRE_FIELD: expire_at(sent_at, event_retention_days()),
         })
 
     def record_email_event(
         self, email_id: str, event_type: str, target: Optional[str] = None,
         client: Optional[str] = None, created_at: Optional[str] = None,
     ) -> None:
+        from dojo.analytics import EXPIRE_FIELD, event_retention_days, expire_at
+        created_at = created_at or utc_now_iso()
         self.email_event_col.document().set({
             "email_id": email_id,
             "event_type": event_type,
             "target": target,
             "client": client,
-            "created_at": created_at or utc_now_iso(),
+            "created_at": created_at,
+            EXPIRE_FIELD: expire_at(created_at, event_retention_days()),
         })
 
     def increment_usage(self, day: str, channel: str, amount: int = 1) -> None:
-        """Atomic per-day counter: dojo_usage/{day} {channel: n}."""
+        """Atomic per-day counter: dojo_usage/{day} {channel: n}. Expires USAGE_RETENTION_DAYS after the day."""
         from google.cloud.firestore import Increment
-        self.usage_col.document(day).set({"day": day, channel: Increment(amount)}, merge=True)
+        from dojo.analytics import EXPIRE_FIELD, expire_at, usage_retention_days
+        self.usage_col.document(day).set(
+            {"day": day, channel: Increment(amount), EXPIRE_FIELD: expire_at(day, usage_retention_days())},
+            merge=True,
+        )
 
     def get_analytics_rows(self, since_iso: str, since_day: str) -> Dict[str, List[Dict[str, Any]]]:
-        sends = [d.to_dict() for d in self.email_send_col.where("sent_at", ">=", since_iso).stream()]
+        """Rows since the given instant/day. Rows past ``expireAt`` are hidden even before TTL deletes them."""
+        from dojo.analytics import EXPIRE_FIELD
+        now = datetime.now(timezone.utc)
+
+        def live(rows):
+            out = []
+            for row in rows:
+                exp = row.get(EXPIRE_FIELD)
+                if isinstance(exp, datetime) and (exp if exp.tzinfo else exp.replace(tzinfo=timezone.utc)) <= now:
+                    continue
+                out.append({k: v for k, v in row.items() if k != EXPIRE_FIELD})
+            return out
+
+        sends = live(d.to_dict() for d in self.email_send_col.where("sent_at", ">=", since_iso).stream())
         ids = [s["email_id"] for s in sends if s.get("email_id")]
         events: List[Dict[str, Any]] = []
         for i in range(0, len(ids), 30):  # Firestore "in" accepts at most 30 values
-            events += [d.to_dict() for d in self.email_event_col.where("email_id", "in", ids[i:i + 30]).stream()]
-        usage = [d.to_dict() for d in self.usage_col.where("day", ">=", since_day).stream()]
+            events += live(d.to_dict() for d in self.email_event_col.where("email_id", "in", ids[i:i + 30]).stream())
+        usage = live(d.to_dict() for d in self.usage_col.where("day", ">=", since_day).stream())
         return {"sends": sends, "events": events, "usage": usage}
+
+    def backfill_analytics_expiry(self, apply: bool = False) -> Dict[str, int]:
+        """Set ``expireAt`` on analytics docs written before DAN-205 (from b2ece8e on). Dry run by default.
+
+        Returns how many docs in each collection lack ``expireAt`` (and were updated, if ``apply``).
+        Docs whose computed expiry is already past are deleted by the TTL policy once it's enabled.
+        """
+        from dojo.analytics import EXPIRE_FIELD, event_retention_days, expire_at, usage_retention_days
+        plan = (
+            (self.email_send_col, "sent_at", event_retention_days()),
+            (self.email_event_col, "created_at", event_retention_days()),
+            (self.usage_col, "day", usage_retention_days()),
+        )
+        counts: Dict[str, int] = {}
+        for col, field, days in plan:
+            name = getattr(col, "id", None) or getattr(col, "name", "?")
+            n = 0
+            for snap in col.stream():
+                data = snap.to_dict() or {}
+                if data.get(EXPIRE_FIELD) is not None:
+                    continue
+                exp = expire_at(data.get(field), days)
+                if exp is None:
+                    logger.warning(f"{name}/{snap.id} has no {field}; skipped (age unknown)")
+                    continue
+                n += 1
+                if apply:
+                    col.document(snap.id).set({EXPIRE_FIELD: exp}, merge=True)
+            counts[name] = n
+        return counts
 
     # --- Urgent Alerts ---
     def is_already_alerted(self, item_id: str) -> bool:
