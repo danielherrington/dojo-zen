@@ -48,6 +48,41 @@ CAVEATS = [
 ]
 
 
+# --- Retention (DAN-205) ---
+# Firestore deletes documents whose ``expireAt`` timestamp has passed once a TTL policy is enabled on
+# the collection (usually within 24h). SQLite has no TTL, so DojoDatabase purges on read/write instead.
+EXPIRE_FIELD = "expireAt"
+
+
+def event_retention_days() -> int:
+    from dojo.config import settings
+    return settings.analytics_retention_days
+
+
+def usage_retention_days() -> int:
+    from dojo.config import settings
+    return settings.usage_retention_days
+
+
+def expire_at(start: Any, days: int) -> Optional[datetime]:
+    """Expiry instant ``days`` after ``start`` (a datetime, ISO timestamp or YYYY-MM-DD day)."""
+    dt = start if isinstance(start, datetime) else _parse(start)
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt + timedelta(days=days)
+
+
+def retention_cutoffs(now: Optional[datetime] = None) -> Dict[str, str]:
+    """ISO cutoffs: rows older than these are past retention."""
+    now = now or datetime.now(timezone.utc)
+    return {
+        "events_before": (now - timedelta(days=event_retention_days())).isoformat(),
+        "usage_before_day": (now - timedelta(days=usage_retention_days())).date().isoformat(),
+    }
+
+
 def new_email_id() -> str:
     return uuid.uuid4().hex
 
@@ -299,6 +334,10 @@ def summarize(
             "totals": dict(totals),
             "daily": [{"day": d, **daily[d]} for d in sorted(daily)],
             "busiest_weekday": _busiest_weekday(daily),
+        },
+        "retention": {
+            "email_events_days": event_retention_days(),
+            "usage_counters_days": usage_retention_days(),
         },
         "caveats": CAVEATS,
     }

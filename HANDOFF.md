@@ -221,3 +221,38 @@ curl -s -X POST https://dojo.herrington.ai/api/sync | python3 -m json.tool
   - Gmail caches the pixel, so repeat opens are under-counted.
   - One message goes to every recipient, so an open means someone in the family opened it.
   - A click counts as an open even when images are blocked.
+
+### Retention (DAN-205)
+
+| Data | Collection / table | Kept for | Env var |
+| :--- | :--- | :--- | :--- |
+| Email sends (kind, subject, counts) | `dojo_email_sends` / `email_sends` | 90 days after `sent_at` | `ANALYTICS_RETENTION_DAYS` |
+| Open/click events | `dojo_email_events` / `email_events` | 90 days after `created_at` | `ANALYTICS_RETENTION_DAYS` |
+| Daily usage counters (aggregate only, no per-person data) | `dojo_usage` / `usage_daily` | 400 days after the day | `USAGE_RETENTION_DAYS` |
+
+The counters are kept longer because `/api/analytics` reports up to 365 days of usage (busiest weekday, trends), and they contain only per-channel counts. Invalid or non-positive values fall back to the defaults.
+
+- **Firestore (production):**
+  - Every write sets an `expireAt` timestamp, and a Firestore TTL policy on each collection deletes the doc after that time, usually within 24h.
+  - Reads hide rows past `expireAt` in the meantime.
+  - The TTL policies have to be enabled once; see below.
+- **SQLite (local):** there's no TTL, so `DojoDatabase.purge_expired_analytics()` runs on every send write and every analytics read.
+- **Why TTL rather than a scheduled cleanup job:**
+  - TTL needs no new Cloud Scheduler job, cron secret path or delete code running with production credentials.
+  - Deletion happens inside Firestore, at no write cost.
+  - Keeping data longer only means changing the env var for new rows.
+  - The trade-offs:
+    - Deletion can lag about 24h, which reads cover by filtering.
+    - Changing the limit doesn't move `expireAt` on rows already written: the backfill only fills missing values. Lowering it later therefore applies to new rows only, and reads still use each row's own `expireAt`.
+    - The TTL policy is a one-time console/gcloud step.
+- **Backfill.** Rows written by DAN-200 before this change have no `expireAt`. `scripts/backfill_analytics_expiry.py` sets it from each row's own timestamp. It's a dry run by default; `--apply` writes.
+
+**One-time setup, needs an owner of `herrington-ai-site`:**
+
+```bash
+uv run python scripts/backfill_analytics_expiry.py --apply
+for c in dojo_email_sends dojo_email_events dojo_usage; do
+  gcloud firestore fields ttls update expireAt --collection-group=$c --enable-ttl --project=herrington-ai-site --quiet
+done
+gcloud firestore fields ttls list --project=herrington-ai-site
+```
