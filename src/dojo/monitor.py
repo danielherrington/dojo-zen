@@ -50,7 +50,7 @@ class MessageMonitor:
         self.db = db or get_database()
         self.client = client
         self.evaluator = AlertEvaluator(gemini_api_key=self.settings.gemini_api_key)
-        self.mailer = Mailer(self.settings)
+        self.mailer = Mailer(self.settings, db=self.db)
 
     def check_once(
         self,

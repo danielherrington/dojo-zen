@@ -20,6 +20,15 @@ from dojo.auth import (
     token_is_valid,
     twilio_request_is_valid,
 )
+from dojo.analytics import (
+    EVENT_CLICK,
+    EVENT_OPEN,
+    PIXEL_GIF,
+    UsageMiddleware,
+    client_category,
+    is_email_id,
+    summarize,
+)
 from dojo.db import get_database
 from dojo.client import DojoClient, sync_roster
 from dojo.digest import DigestEngine, parse_and_format_timestamp
@@ -62,6 +71,15 @@ app.mount("/mcp", mcp_subapp)
 
 # Token gate for the portal, /api/* and /mcp (no-op unless REQUIRE_AUTH=true). DAN-166.
 app.add_middleware(AccessGuardMiddleware)
+
+
+def _record_usage(day: str, channel: str) -> None:
+    if hasattr(db, "increment_usage"):
+        db.increment_usage(day, channel)
+
+
+# Per-channel daily usage counters (DAN-200). Outermost, so requests rejected by the token gate aren't counted.
+app.add_middleware(UsageMiddleware, recorder=_record_usage, enabled=lambda: settings.usage_analytics)
 
 WEB_DIR = Path(__file__).parent / "web"
 
@@ -488,6 +506,49 @@ async def cron_daily_digest(
     except Exception as e:
         logger.error(f"Cron daily-digest error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Email & usage analytics (DAN-200) ---
+# The tracking endpoints are public (an email client can't send the access token). They only accept
+# random 32-hex email ids, store no IPs or user-agents, and never return data.
+
+_NO_STORE = {"Cache-Control": "no-store, private, max-age=0"}
+
+
+def _record_email_event(email_id: str, event_type: str, target: Optional[str], user_agent: Optional[str]) -> None:
+    if not settings.email_tracking or not is_email_id(email_id) or not hasattr(db, "record_email_event"):
+        return
+    try:
+        db.record_email_event(email_id, event_type, target=target, client=client_category(user_agent))
+    except Exception as e:
+        logger.warning(f"Could not record email {event_type}: {e}")
+
+
+@app.get("/t/o/{email_id}.gif", include_in_schema=False)
+async def track_open(email_id: str, user_agent: Optional[str] = Header(None)):
+    _record_email_event(email_id, EVENT_OPEN, None, user_agent)
+    return Response(content=PIXEL_GIF, media_type="image/gif", headers=_NO_STORE)
+
+
+@app.get("/t/c/{email_id}", include_in_schema=False)
+async def track_click(email_id: str, u: Optional[str] = Query(None), user_agent: Optional[str] = Header(None)):
+    target = safe_next(u)  # same-site paths only: never an open redirect
+    _record_email_event(email_id, EVENT_CLICK, target, user_agent)
+    return RedirectResponse(target, status_code=302, headers=_NO_STORE)
+
+
+@app.get("/api/analytics")
+async def api_analytics(days: int = Query(30, ge=1, le=365)):
+    """Email open/click rates and per-channel usage over the last ``days`` days."""
+    from datetime import datetime, timedelta, timezone
+    from dojo.tz import to_family_tz
+
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+    if not hasattr(db, "get_analytics_rows"):
+        raise HTTPException(status_code=501, detail="Analytics not supported by this storage backend.")
+    rows = db.get_analytics_rows(since.isoformat(), to_family_tz(since).date().isoformat())
+    return summarize(rows["sends"], rows["events"], rows["usage"], days=days, now=now)
 
 
 def run_server(host: str = "0.0.0.0", port: int = 8000):

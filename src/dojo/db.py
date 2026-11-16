@@ -133,6 +133,38 @@ class DojoDatabase:
             if "attempts" not in alert_cols:
                 cursor.execute("ALTER TABLE alerts ADD COLUMN attempts INTEGER NOT NULL DEFAULT 1")
 
+            # Email & usage analytics (DAN-200)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS email_sends (
+                    email_id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    subject TEXT,
+                    recipient_count INTEGER DEFAULT 0,
+                    item_count INTEGER DEFAULT 0,
+                    sent_at TEXT NOT NULL
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS email_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    email_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    target TEXT,
+                    client TEXT,
+                    created_at TEXT NOT NULL
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS usage_daily (
+                    day TEXT NOT NULL,
+                    channel TEXT NOT NULL,
+                    count INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (day, channel)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_email_sends_sent_at ON email_sends(sent_at)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_email_events_email ON email_events(email_id)")
+
             # Indexes for querying undigested and alerted records
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_feed_digested ON feed_items(digested_at)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_msg_digested ON messages(digested_at)")
@@ -494,6 +526,54 @@ class DojoDatabase:
             ))
             conn.commit()
             return cur.lastrowid or 0
+
+    # --- Email & usage analytics (DAN-200) ---
+    def record_email_send(
+        self, email_id: str, kind: str, subject: str, recipient_count: int, item_count: int, sent_at: str
+    ) -> None:
+        with self.get_connection() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO email_sends (email_id, kind, subject, recipient_count, item_count, sent_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (email_id, kind, subject, recipient_count, item_count, sent_at),
+            )
+            conn.commit()
+
+    def record_email_event(
+        self, email_id: str, event_type: str, target: Optional[str] = None,
+        client: Optional[str] = None, created_at: Optional[str] = None,
+    ) -> None:
+        with self.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO email_events (email_id, event_type, target, client, created_at) VALUES (?, ?, ?, ?, ?)",
+                (email_id, event_type, target, client, created_at or utc_now_iso()),
+            )
+            conn.commit()
+
+    def increment_usage(self, day: str, channel: str, amount: int = 1) -> None:
+        with self.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO usage_daily (day, channel, count) VALUES (?, ?, ?) "
+                "ON CONFLICT(day, channel) DO UPDATE SET count = usage_daily.count + excluded.count",
+                (day, channel, amount),
+            )
+            conn.commit()
+
+    def get_analytics_rows(self, since_iso: str, since_day: str) -> Dict[str, List[Dict[str, Any]]]:
+        """Raw sends, events and per-day usage since the given instant/day (summarised in dojo.analytics)."""
+        with self.get_connection() as conn:
+            sends = [dict(r) for r in conn.execute(
+                "SELECT * FROM email_sends WHERE sent_at >= ?", (since_iso,))]
+            ids = [s["email_id"] for s in sends]
+            events: List[Dict[str, Any]] = []
+            for i in range(0, len(ids), 500):
+                chunk = ids[i:i + 500]
+                events += [dict(r) for r in conn.execute(
+                    f"SELECT * FROM email_events WHERE email_id IN ({','.join('?' * len(chunk))})", chunk)]
+            usage: Dict[str, Dict[str, Any]] = {}
+            for r in conn.execute("SELECT day, channel, count FROM usage_daily WHERE day >= ?", (since_day,)):
+                usage.setdefault(r["day"], {"day": r["day"]})[r["channel"]] = r["count"]
+        return {"sends": sends, "events": events, "usage": list(usage.values())}
 
     def get_unalerted_items(self) -> Dict[str, List[Dict[str, Any]]]:
         """Fetch all messages and feed items that have not yet been evaluated for immediate alerts."""

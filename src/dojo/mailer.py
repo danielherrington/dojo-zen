@@ -15,8 +15,9 @@ from dojo.digest import Briefing
 class Mailer:
     """Renders briefing into HTML/text email and sends via SMTP."""
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, db: Optional[Any] = None):
         self.settings = settings
+        self.db = db  # optional: records sends for open/click analytics (DAN-200)
         templates_dir = Path(__file__).parent / "templates"
         self.jinja_env = Environment(
             loader=FileSystemLoader(str(templates_dir)),
@@ -38,6 +39,22 @@ class Mailer:
             decision=decision,
             app_base_url=self.settings.app_base_url.rstrip("/")
         )
+
+    def _tracked(self, html_content: str) -> tuple[str, Optional[str]]:
+        """Add open/click tracking when enabled; returns (html, email_id)."""
+        if not self.settings.email_tracking or self.db is None:
+            return html_content, None
+        from dojo.analytics import instrument_html, new_email_id
+        email_id = new_email_id()
+        try:
+            return instrument_html(html_content, email_id, self.settings.app_base_url), email_id
+        except Exception:
+            return html_content, None
+
+    def _record_send(self, email_id: Optional[str], kind: str, subject: str, recipients: list, item_count: int) -> None:
+        if email_id:
+            from dojo.analytics import record_send_safely
+            record_send_safely(self.db, email_id, kind, subject, len(recipients), item_count)
 
     def save_preview(self, html_content: str, output_path: Optional[Path] = None) -> Path:
         """Save rendered HTML digest to a local file for browser inspection."""
@@ -70,7 +87,7 @@ class Mailer:
                 "and SMTP_PASS in your .env file."
             )
 
-        html_content = self.render_html(briefing)
+        html_content, email_id = self._tracked(self.render_html(briefing))
 
         # Build multipart message
         msg = MIMEMultipart("alternative")
@@ -102,9 +119,10 @@ class Mailer:
             if self.settings.smtp_user and self.settings.smtp_pass:
                 server.login(self.settings.smtp_user, self.settings.smtp_pass)
             server.sendmail(self.settings.smtp_user, recipients, msg.as_string())
-            return True
         finally:
             server.quit()
+        self._record_send(email_id, "digest", msg["Subject"], recipients, getattr(briefing, "daily_item_count", 0))
+        return True
 
     def send_urgent_alert(self, decision: Any, to_email: Optional[str] = None) -> bool:
         """Send an immediate priority alert email for urgent events."""
@@ -122,7 +140,7 @@ class Mailer:
                 "and SMTP_PASS in your .env file."
             )
 
-        html_content = self.render_alert_html(decision)
+        html_content, email_id = self._tracked(self.render_alert_html(decision))
         plain_text = (
             f"🚨 URGENT DOJOZEN ALERT\n"
             f"=========================================\n"
@@ -154,9 +172,10 @@ class Mailer:
             if self.settings.smtp_user and self.settings.smtp_pass:
                 server.login(self.settings.smtp_user, self.settings.smtp_pass)
             server.sendmail(self.settings.smtp_user, recipients, msg.as_string())
-            return True
         finally:
             server.quit()
+        self._record_send(email_id, "alert", msg["Subject"], recipients, 1)
+        return True
 
 
 def is_digest_window_allowed(ref_dt: Optional[Any] = None) -> tuple[bool, str]:
@@ -268,7 +287,7 @@ def dispatch_daily_briefing(
 
     daily_count = briefing.daily_item_count
     text_content = engine.format_plain_text(briefing)
-    mailer = Mailer(s)
+    mailer = Mailer(s, db=db)
 
     if dry_run:
         html_preview = mailer.render_html(briefing)
