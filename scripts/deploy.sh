@@ -83,13 +83,13 @@ else
     --http-method POST
 fi
 
-# Job B: Daily morning digest at 7:00 AM Eastern Time
+# Job B: Weekday morning digest at 7:00 AM Eastern Time (Mon–Fri; no weekend mornings — DAN-98)
 if gcloud scheduler jobs describe dojo-daily-digest --location "$REGION" --project "$PROJECT_ID" &>/dev/null; then
   echo "Updating existing scheduler job 'dojo-daily-digest'..."
   gcloud scheduler jobs update http dojo-daily-digest \
     --location "$REGION" \
     --project "$PROJECT_ID" \
-    --schedule "0 7 * * *" \
+    --schedule "0 7 * * 1-5" \
     --time-zone "America/New_York" \
     --uri "$SERVICE_URL/api/cron/daily-digest?secret=$CRON_SECRET" \
     --http-method POST
@@ -98,7 +98,28 @@ else
   gcloud scheduler jobs create http dojo-daily-digest \
     --location "$REGION" \
     --project "$PROJECT_ID" \
-    --schedule "0 7 * * *" \
+    --schedule "0 7 * * 1-5" \
+    --time-zone "America/New_York" \
+    --uri "$SERVICE_URL/api/cron/daily-digest?secret=$CRON_SECRET" \
+    --http-method POST
+fi
+
+# Job C: Sunday evening week-ahead briefing at 6:00 PM Eastern Time (DAN-98)
+if gcloud scheduler jobs describe dojo-sunday-digest --location "$REGION" --project "$PROJECT_ID" &>/dev/null; then
+  echo "Updating existing scheduler job 'dojo-sunday-digest'..."
+  gcloud scheduler jobs update http dojo-sunday-digest \
+    --location "$REGION" \
+    --project "$PROJECT_ID" \
+    --schedule "0 18 * * 0" \
+    --time-zone "America/New_York" \
+    --uri "$SERVICE_URL/api/cron/daily-digest?secret=$CRON_SECRET" \
+    --http-method POST
+else
+  echo "Creating scheduler job 'dojo-sunday-digest'..."
+  gcloud scheduler jobs create http dojo-sunday-digest \
+    --location "$REGION" \
+    --project "$PROJECT_ID" \
+    --schedule "0 18 * * 0" \
     --time-zone "America/New_York" \
     --uri "$SERVICE_URL/api/cron/daily-digest?secret=$CRON_SECRET" \
     --http-method POST

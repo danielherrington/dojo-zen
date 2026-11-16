@@ -13,7 +13,7 @@
 **Dojo Zen** is an autonomous ClassDojo anti-bloat parental assistant built for Daniel & family (student: **Isabella Herrington**, Kindergarten, **Ms. Alonso's Class** at **North Beach Elementary School**).
 
 It connects directly to ClassDojo's internal web REST APIs, strips out promotional upsells (*ClassDojo Plus*, *Dojo Beyond*, monster outfits), extracts actionable logistics (what to bring/wear, homework packets, test schedules, calendar events, and **Gemini Multimodal OCR** flyer transcripts), and surfaces them via:
-1. **Daily Email Briefings** (7:00 AM ET via Cloud Scheduler + SMTP)
+1. **Email Briefings** (weekdays 7:00 AM ET + Sunday 6:00 PM ET week-ahead, via Cloud Scheduler + SMTP; none on Saturday)
 2. **Real-Time Emergency Alerts** (polled every 10 minutes via Cloud Scheduler; immediate high-priority email only for true emergencies)
 3. **Mobile-Friendly Family Web Portal** (`https://dojo.herrington.ai`) with grounded Q&A, live briefing, and searchable unified feed
 4. **Remote & Local Model Context Protocol (MCP) Server** (`https://dojo.herrington.ai/mcp` over Streamable HTTP + local `stdio`)
@@ -33,7 +33,8 @@ It connects directly to ClassDojo's internal web REST APIs, strips out promotion
 | **Database (Local/Test)** | SQLite (`data/dojo.db`) | Default when `USE_FIRESTORE=false` |
 | **Session Persistence** | Firestore `dojo_config/session` & `data/session.json` | Stores ClassDojo cookies (`dojo_login.sid`, `dojo_home_login.sid`) |
 | **Cron: Urgent Alerts** | Cloud Scheduler `dojo-check-alerts` | `*/10 * * * *` (`America/New_York`) → `POST /api/cron/check-alerts?secret=...` |
-| **Cron: Daily Digest** | Cloud Scheduler `dojo-daily-digest` | `0 7 * * *` (`America/New_York`) → `POST /api/cron/daily-digest?secret=...` |
+| **Cron: Weekday Digest** | Cloud Scheduler `dojo-daily-digest` | `0 7 * * 1-5` (`America/New_York`) → `POST /api/cron/daily-digest?secret=...` |
+| **Cron: Sunday Week-Ahead** | Cloud Scheduler `dojo-sunday-digest` | `0 18 * * 0` (`America/New_York`) → same endpoint. The endpoint itself also refuses Saturday and Sunday-morning sends ([`src/dojo/schedule.py`](src/dojo/schedule.py), DAN-98) unless `force=true` |
 
 ---
 
@@ -65,6 +66,7 @@ It connects directly to ClassDojo's internal web REST APIs, strips out promotion
 │   ├── firestore_db.py              # Production Cloud Firestore database (FirestoreDojoDatabase)
 │   ├── digest.py                    # DigestEngine, temporal date resolver, attachment classifier
 │   ├── vision.py                    # Gemini Multimodal OCR (gemini-2.5-flash) for flyer images
+│   ├── schedule.py                  # Family-timezone clock & briefing send policy (no Saturday, Sunday evening only)
 │   ├── qa.py                        # Grounded natural-language Q&A engine (DojoQA)
 │   ├── alert_evaluator.py           # Urgency classifier (IMMEDIATE vs ROUTINE vs BLOAT)
 │   ├── monitor.py                   # Real-time alert monitor (MessageMonitor)
@@ -75,7 +77,7 @@ It connects directly to ClassDojo's internal web REST APIs, strips out promotion
 │   ├── cli.py                       # CLI entrypoints (login, sync, recap, run, serve, mcp, etc.)
 │   ├── templates/                   # Jinja2 email templates (email_digest.html, email_alert.html)
 │   └── web/index.html               # Mobile-friendly SPA (Ask Dojo, Today's Briefing, Class Feed)
-└── tests/                           # 53 unit & integration tests (zero external credentials needed)
+└── tests/                           # 64 unit & integration tests (zero external credentials needed)
 ```
 
 ---
@@ -115,7 +117,7 @@ When you open this repository in a fresh **Cloud Project** (where gitignored fil
 uv sync
 uv run pytest
 ```
-*(All 53 unit and HTTP MCP tests run against temporary SQLite databases and mock HTTP transports—no credentials required.)*
+*(All 64 unit and HTTP MCP tests run against temporary SQLite databases and mock HTTP transports—no credentials required.)*
 
 ### Step 2: Verify GCP Authentication (`herrington-ai-site`)
 ```bash

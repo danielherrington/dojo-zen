@@ -59,6 +59,9 @@ class Settings(BaseModel):
         default_factory=lambda: os.getenv("APP_BASE_URL", "https://dojo.herrington.ai")
     )
 
+    # IANA timezone for the family's wall clock (briefing schedule, Morning/Evening label)
+    digest_timezone: str = Field(default_factory=lambda: os.getenv("DIGEST_TIMEZONE", "America/New_York"))
+
     cron_secret: str = Field(default_factory=lambda: os.getenv("CRON_SECRET", "dojo-zen-cron-token"))
 
     def ensure_directories(self) -> None:

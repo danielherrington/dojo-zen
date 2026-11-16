@@ -34,7 +34,7 @@ When working inside an **Antigravity Cloud Project** cloned from GitHub:
 - **Python Dependency Management (`uv`)**:
   - Always use `uv sync` and `uv run ...` (never global `pip install`).
 - **Testing & Verification**:
-  - Run full unit & HTTP MCP test suite (53 tests, zero external credentials needed):
+  - Run full unit & HTTP MCP test suite (64 tests, zero external credentials needed):
     ```bash
     uv run pytest
     ```

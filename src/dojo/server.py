@@ -359,8 +359,18 @@ async def cron_daily_digest(
     secret: Optional[str] = Query(None),
     force: bool = Query(False)
 ):
-    """Webhook triggered by Cloud Scheduler (e.g. 7:00 AM daily) to send morning recap."""
+    """Webhook triggered by Cloud Scheduler (weekdays 7:00 AM + Sunday evening) to send the briefing.
+
+    Saturdays and Sunday mornings are skipped (DAN-98) even if the scheduler fires,
+    unless ``force=true`` is passed.
+    """
     _verify_cron_secret(authorization, secret)
+
+    from dojo.schedule import digest_schedule_decision
+    should_send, reason = digest_schedule_decision()
+    if not should_send and not force:
+        logger.info(f"Skipping scheduled daily digest: {reason}")
+        return {"status": "skipped", "reason": reason}
 
     try:
         # 1. Sync latest from ClassDojo if session is valid

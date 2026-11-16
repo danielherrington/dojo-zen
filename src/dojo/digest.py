@@ -5,6 +5,8 @@ from datetime import datetime, timezone, date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field, computed_field
 
+from dojo.schedule import local_now
+
 # Patterns indicative of ClassDojo marketing, avatar dressing, or gamification bloat
 BLOAT_PATTERNS = [
     r"classdojo plus",
@@ -507,8 +509,8 @@ class ClassroomHighlight(BaseModel):
 
 
 class Briefing(BaseModel):
-    generated_at: str = Field(default_factory=lambda: datetime.now().astimezone().strftime("%A, %b %d, %Y"))
-    period: str = Field(default_factory=lambda: "Morning" if datetime.now().astimezone().hour < 12 else "Evening")
+    generated_at: str = Field(default_factory=lambda: local_now().strftime("%A, %b %d, %Y"))
+    period: str = Field(default_factory=lambda: "Morning" if local_now().hour < 12 else "Evening")
     children_names: List[str] = Field(default_factory=list)
     action_items: List[ActionItem] = Field(default_factory=list)
     upcoming_dates: List[UpcomingDate] = Field(default_factory=list)
