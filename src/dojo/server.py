@@ -3,14 +3,23 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from fastapi import FastAPI, Form, Header, HTTPException, Query, Response
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, Form, Header, HTTPException, Query, Request, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.routing import Route
 from mcp.server.transport_security import TransportSecuritySettings
 
 from dojo.config import settings
+from dojo.auth import (
+    SESSION_COOKIE,
+    AccessGuardMiddleware,
+    cron_token_is_valid,
+    is_cloud_run,
+    safe_next,
+    token_is_valid,
+    twilio_request_is_valid,
+)
 from dojo.db import get_database
 from dojo.client import DojoClient, sync_roster
 from dojo.digest import DigestEngine, parse_and_format_timestamp
@@ -51,11 +60,14 @@ if mcp_subapp.routes:
     app.routes.append(Route("/mcp", endpoint=mcp_subapp.routes[0].endpoint))
 app.mount("/mcp", mcp_subapp)
 
+# Token gate for the portal, /api/* and /mcp (no-op unless REQUIRE_AUTH=true). DAN-166.
+app.add_middleware(AccessGuardMiddleware)
+
 WEB_DIR = Path(__file__).parent / "web"
 
 
 def _verify_cron_secret(authorization: Optional[str] = None, secret: Optional[str] = None) -> None:
-    """Verify bearer token or query secret matches CRON_SECRET."""
+    """Verify bearer token or query secret matches CRON_SECRET (fails closed on Cloud Run if unset)."""
     token = None
     if authorization:
         parts = authorization.split()
@@ -64,9 +76,60 @@ def _verify_cron_secret(authorization: Optional[str] = None, secret: Optional[st
     if not token and secret:
         token = secret
 
-    expected = settings.cron_secret
-    if expected and token != expected:
+    if not cron_token_is_valid(token, settings):
         raise HTTPException(status_code=401, detail="Unauthorized: invalid cron secret token.")
+
+
+LOGIN_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DojoZen Sign In</title>
+<style>
+  body{{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f8fafc;color:#0f172a;
+       display:flex;min-height:100vh;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}}
+  form{{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:24px;width:100%;max-width:360px}}
+  h1{{font-size:20px;margin:0 0 8px}} p{{color:#475569;font-size:14px;margin:0 0 16px}}
+  input{{width:100%;box-sizing:border-box;padding:10px;border:1px solid #cbd5e1;border-radius:8px;font-size:16px}}
+  button{{margin-top:12px;width:100%;padding:10px;border:0;border-radius:8px;background:#4f46e5;color:#fff;font-size:16px}}
+  .err{{color:#dc2626}}
+</style></head><body>
+<form method="post" action="/login">
+  <h1>🎒 DojoZen</h1>
+  <p>This family portal is private. Enter your access code.</p>
+  {error}
+  <input type="password" name="token" autocomplete="current-password" placeholder="Access code" required autofocus>
+  <input type="hidden" name="next" value="{next}">
+  <button type="submit">Sign in</button>
+</form></body></html>"""
+
+
+def _render_login(next_path: str, error: str = "") -> str:
+    import html as _html
+    err = f'<p class="err">{_html.escape(error)}</p>' if error else ""
+    return LOGIN_PAGE.format(error=err, next=_html.escape(safe_next(next_path), quote=True))
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(next: str = "/"):
+    return HTMLResponse(_render_login(next))
+
+
+@app.post("/login")
+async def login_submit(request: Request, token: str = Form(""), next: str = Form("/")):
+    if not token_is_valid(token, settings):
+        return HTMLResponse(_render_login(next, "That access code didn't work."), status_code=401)
+    secure = request.headers.get("x-forwarded-proto", request.url.scheme) == "https" or is_cloud_run()
+    response = RedirectResponse(safe_next(next), status_code=303)
+    response.set_cookie(
+        SESSION_COOKIE, token, max_age=60 * 60 * 24 * 180, httponly=True, secure=secure, samesite="lax", path="/",
+    )
+    return response
+
+
+@app.post("/logout")
+async def logout():
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return response
 
 
 class AskRequest(BaseModel):
@@ -304,8 +367,21 @@ async def get_status():
 
 # --- Twilio SMS / WhatsApp / RCS Inbound Webhook ---
 
+def _twilio_candidate_urls(request: Request) -> List[str]:
+    """URLs Twilio may have signed: the public portal URL and the URL as seen through any proxy."""
+    path_qs = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    return [
+        settings.app_base_url.rstrip("/") + path_qs,
+        f"{proto}://{host}{path_qs}",
+        str(request.url),
+    ]
+
+
 @app.post("/api/sms/webhook")
 async def twilio_sms_webhook(
+    request: Request,
     From: str = Form(""),
     Body: str = Form(""),
     To: str = Form(""),
@@ -314,6 +390,20 @@ async def twilio_sms_webhook(
 ):
     """Inbound webhook called by Twilio when an SMS, WhatsApp, or RCS text is received."""
     from dojo.sms import handle_incoming_sms
+
+    form = await request.form()
+    params = {k: str(v) for k, v in form.items()}
+    signed = twilio_request_is_valid(
+        settings.twilio_auth_token,
+        request.headers.get("x-twilio-signature"),
+        _twilio_candidate_urls(request),
+        params,
+    )
+    if not signed:
+        if settings.require_auth:
+            logger.warning("Rejected SMS webhook with missing/invalid Twilio signature (From=%s).", From)
+            raise HTTPException(status_code=403, detail="Invalid Twilio signature.")
+        logger.warning("SMS webhook has no valid Twilio signature; allowed because REQUIRE_AUTH is off.")
 
     logger.info(f"Incoming text from {From} (To: {To}): {Body[:60]}")
     twiml = handle_incoming_sms(

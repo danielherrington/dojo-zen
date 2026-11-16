@@ -59,7 +59,16 @@ class Settings(BaseModel):
         default_factory=lambda: os.getenv("APP_BASE_URL", "https://dojo.herrington.ai")
     )
 
-    cron_secret: str = Field(default_factory=lambda: os.getenv("CRON_SECRET", "dojo-zen-cron-token"))
+    # No hard-coded default: an unset CRON_SECRET rejects every cron call on Cloud Run (DAN-166).
+    cron_secret: str = Field(default_factory=lambda: os.getenv("CRON_SECRET", ""))
+
+    # Access control (DAN-166). Inert until REQUIRE_AUTH=true so deploys never lock out clients.
+    dojo_access_token: str = Field(
+        default_factory=lambda: os.getenv("DOJO_ACCESS_TOKEN", "")
+    )  # Comma-separated; any one grants access to the portal, /api/* and /mcp
+    require_auth: bool = Field(
+        default_factory=lambda: os.getenv("REQUIRE_AUTH", "").lower() in ("true", "1", "yes")
+    )
 
     def ensure_directories(self) -> None:
         """Ensure parent directories for session and database files exist."""
