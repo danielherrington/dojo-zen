@@ -59,7 +59,13 @@ echo "✓ Public Web Portal URL: $PUBLIC_URL"
 echo ""
 echo "⏰ Step 4: Configuring Cloud Scheduler Jobs..."
 
-CRON_SECRET="dojo-zen-cron-7e83bc14"
+# CRON_SECRET must match the value set on the dojo-zen service. Never commit it: read it from the
+# environment, or from the macOS Keychain item created during rotation (service "dojo-zen").
+CRON_SECRET="${CRON_SECRET:-$(security find-generic-password -s dojo-zen -a CRON_SECRET -w 2>/dev/null || true)}"
+if [ -z "$CRON_SECRET" ]; then
+  echo "❌ CRON_SECRET is not set (export it or add it to the Keychain); refusing to configure Cloud Scheduler." >&2
+  exit 1
+fi
 
 # Job A: Check urgent alerts every 10 minutes (8am to 5pm on weekdays)
 # Or */10 * * * * for 24/7 monitoring
@@ -70,7 +76,8 @@ if gcloud scheduler jobs describe dojo-check-alerts --location "$REGION" --proje
     --project "$PROJECT_ID" \
     --schedule "*/10 * * * *" \
     --time-zone "America/New_York" \
-    --uri "$SERVICE_URL/api/cron/check-alerts?secret=$CRON_SECRET" \
+    --uri "$SERVICE_URL/api/cron/check-alerts" \
+    --update-headers "Authorization=Bearer $CRON_SECRET" \
     --http-method POST
 else
   echo "Creating scheduler job 'dojo-check-alerts'..."
@@ -79,7 +86,8 @@ else
     --project "$PROJECT_ID" \
     --schedule "*/10 * * * *" \
     --time-zone "America/New_York" \
-    --uri "$SERVICE_URL/api/cron/check-alerts?secret=$CRON_SECRET" \
+    --uri "$SERVICE_URL/api/cron/check-alerts" \
+    --headers "Authorization=Bearer $CRON_SECRET" \
     --http-method POST
 fi
 
@@ -91,7 +99,8 @@ if gcloud scheduler jobs describe dojo-daily-digest --location "$REGION" --proje
     --project "$PROJECT_ID" \
     --schedule "0 7 * * 1-5" \
     --time-zone "America/New_York" \
-    --uri "$SERVICE_URL/api/cron/daily-digest?secret=$CRON_SECRET" \
+    --uri "$SERVICE_URL/api/cron/daily-digest" \
+    --update-headers "Authorization=Bearer $CRON_SECRET" \
     --http-method POST
 else
   echo "Creating scheduler job 'dojo-daily-digest' (Mon-Fri 7:00 AM ET)..."
@@ -100,7 +109,8 @@ else
     --project "$PROJECT_ID" \
     --schedule "0 7 * * 1-5" \
     --time-zone "America/New_York" \
-    --uri "$SERVICE_URL/api/cron/daily-digest?secret=$CRON_SECRET" \
+    --uri "$SERVICE_URL/api/cron/daily-digest" \
+    --headers "Authorization=Bearer $CRON_SECRET" \
     --http-method POST
 fi
 
@@ -112,7 +122,8 @@ if gcloud scheduler jobs describe dojo-sunday-digest --location "$REGION" --proj
     --project "$PROJECT_ID" \
     --schedule "0 18 * * 0" \
     --time-zone "America/New_York" \
-    --uri "$SERVICE_URL/api/cron/daily-digest?secret=$CRON_SECRET" \
+    --uri "$SERVICE_URL/api/cron/daily-digest" \
+    --update-headers "Authorization=Bearer $CRON_SECRET" \
     --http-method POST
 else
   echo "Creating scheduler job 'dojo-sunday-digest' (Sun 6:00 PM ET)..."
@@ -121,7 +132,8 @@ else
     --project "$PROJECT_ID" \
     --schedule "0 18 * * 0" \
     --time-zone "America/New_York" \
-    --uri "$SERVICE_URL/api/cron/daily-digest?secret=$CRON_SECRET" \
+    --uri "$SERVICE_URL/api/cron/daily-digest" \
+    --headers "Authorization=Bearer $CRON_SECRET" \
     --http-method POST
 fi
 

@@ -32,9 +32,9 @@ It connects directly to ClassDojo's internal web REST APIs, strips out promotion
 | **Database (Prod)** | Cloud Firestore (`(default)`) | Enabled when `USE_FIRESTORE=true`. Collections: `dojo_children`, `dojo_classes`, `dojo_feed_items`, `dojo_messages`, `dojo_events`, `dojo_digests`, `dojo_alerts`, `dojo_config` |
 | **Database (Local/Test)** | SQLite (`data/dojo.db`) | Default when `USE_FIRESTORE=false` |
 | **Session Persistence** | Firestore `dojo_config/session` & `data/session.json` | Stores ClassDojo cookies (`dojo_login.sid`, `dojo_home_login.sid`) |
-| **Cron: Urgent Alerts** | Cloud Scheduler `dojo-check-alerts` | `*/10 * * * *` (`America/New_York`) → `POST /api/cron/check-alerts?secret=...` |
-| **Cron: Weekday Digest** | Cloud Scheduler `dojo-daily-digest` | `0 7 * * 1-5` (`America/New_York`, Mon–Fri 7:00 AM ET) → `POST /api/cron/daily-digest?secret=...` |
-| **Cron: Sunday Digest** | Cloud Scheduler `dojo-sunday-digest` | `0 18 * * 0` (`America/New_York`, Sun 6:00 PM ET week-ahead; no Saturday or Sunday morning emails) → `POST /api/cron/daily-digest?secret=...` |
+| **Cron: Urgent Alerts** | Cloud Scheduler `dojo-check-alerts` | `*/10 * * * *` (`America/New_York`) → `POST /api/cron/check-alerts` with `Authorization: Bearer $CRON_SECRET` |
+| **Cron: Weekday Digest** | Cloud Scheduler `dojo-daily-digest` | `0 7 * * 1-5` (`America/New_York`, Mon–Fri 7:00 AM ET) → `POST /api/cron/daily-digest` with `Authorization: Bearer $CRON_SECRET` |
+| **Cron: Sunday Digest** | Cloud Scheduler `dojo-sunday-digest` | `0 18 * * 0` (`America/New_York`, Sun 6:00 PM ET week-ahead; no Saturday or Sunday morning emails) → `POST /api/cron/daily-digest` with `Authorization: Bearer $CRON_SECRET` |
 
 ---
 
@@ -194,6 +194,8 @@ curl -s -X POST https://dojo.herrington.ai/api/sync | python3 -m json.tool
 | `/api/status` | Public (counts only) |
 | `/api/sms/webhook` | Valid `X-Twilio-Signature` (HMAC-SHA1 with `TWILIO_AUTH_TOKEN`); unsigned requests are logged and still allowed while `REQUIRE_AUTH` is off |
 | `/api/cron/*` | `CRON_SECRET` always; there's no built-in default, and an empty secret rejects every call |
+
+**Where secrets live (rotated 2026-11-16):** `CRON_SECRET` and `DOJO_ACCESS_TOKEN` are env vars on the `dojo-zen` Cloud Run service. Copies are in Daniel's macOS Keychain (service `dojo-zen`, accounts `CRON_SECRET` / `DOJO_ACCESS_TOKEN`; read one with `security find-generic-password -s dojo-zen -a CRON_SECRET -w`). `CRON_SECRET` is also a GitHub Actions secret used by the scheduler-sync step. Never commit them. To rotate `CRON_SECRET`, change all three, then re-run the scheduler sync (`scripts/deploy.sh` or the workflow).
 
 `DOJO_ACCESS_TOKEN` can hold several comma-separated tokens (for example one per family member or MCP client), so a single token can be revoked.
 
