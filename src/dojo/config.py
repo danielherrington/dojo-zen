@@ -59,6 +59,12 @@ class Settings(BaseModel):
         default_factory=lambda: os.getenv("APP_BASE_URL", "https://dojo.herrington.ai")
     )
 
+    # IANA timezone for the family's wall clock: Today/Tomorrow bucketing, Morning/Evening label,
+    # weekend send window (DAN-165). Cloud Run itself runs in UTC.
+    digest_timezone: str = Field(
+        default_factory=lambda: os.getenv("DIGEST_TIMEZONE", "America/New_York")
+    )
+
     # No hard-coded default: an unset CRON_SECRET rejects every cron call on Cloud Run (DAN-166).
     cron_secret: str = Field(default_factory=lambda: os.getenv("CRON_SECRET", ""))
 

@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from dojo.db import DojoDatabase
+from dojo.tz import family_now, to_family_tz
 from dojo.digest import parse_and_format_timestamp, is_bloat
 
 
@@ -177,7 +178,7 @@ class DojoQA:
                 expanded_keywords.update(related_words)
 
         scored = []
-        now = datetime.now().astimezone()
+        now = family_now()
 
         for rec in records:
             content = f"{rec.get('header', '')} {rec.get('text', '')}".lower()
@@ -213,7 +214,7 @@ class DojoQA:
             raw_time = rec.get("timestamp")
             if raw_time:
                 try:
-                    dt = datetime.fromisoformat(raw_time.replace("Z", "+00:00")).astimezone()
+                    dt = to_family_tz(datetime.fromisoformat(raw_time.replace("Z", "+00:00")))
                     days_old = (now.date() - dt.date()).days
                     if days_old <= 1:
                         score += 8.0

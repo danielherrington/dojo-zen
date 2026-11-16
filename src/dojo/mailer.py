@@ -168,9 +168,9 @@ def is_digest_window_allowed(ref_dt: Optional[Any] = None) -> tuple[bool, str]:
     - Monday–Friday: Allowed.
     """
     from datetime import datetime
-    from zoneinfo import ZoneInfo
+    from dojo.tz import family_now, family_tz, to_family_tz
 
-    effective_dt = ref_dt if isinstance(ref_dt, datetime) else datetime.now(ZoneInfo("America/New_York"))
+    effective_dt = to_family_tz(ref_dt, naive_tz=family_tz()) if isinstance(ref_dt, datetime) else family_now()
     weekday = effective_dt.weekday()  # 0=Mon ... 5=Sat, 6=Sun
 
     if weekday == 5:
@@ -192,12 +192,12 @@ def dispatch_daily_briefing(
 ) -> dict:
     """Compile and dispatch daily briefing email, enforcing weekend quiet windows and quiet-day skipping unless forced."""
     from datetime import datetime, timedelta
-    from zoneinfo import ZoneInfo
     from dojo.config import settings as default_settings
+    from dojo.tz import family_now, family_tz, to_family_tz
     from dojo.digest import DigestEngine, collect_briefing_inputs, parse_raw_datetime
 
     s = settings or default_settings
-    effective_ref = ref_dt if isinstance(ref_dt, datetime) else datetime.now(ZoneInfo("America/New_York"))
+    effective_ref = to_family_tz(ref_dt, naive_tz=family_tz()) if isinstance(ref_dt, datetime) else family_now()
 
     # 1. Weekend schedule guardrail (never send Saturday or Sunday morning briefings unless forced;
     #    leave undigested items untouched so they roll into Sunday evening's briefing).
