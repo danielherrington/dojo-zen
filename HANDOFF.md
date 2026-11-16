@@ -172,6 +172,8 @@ curl -s -X POST https://dojo.herrington.ai/api/sync | python3 -m json.tool
 - **ClassDojo Session Expired (`401` on `/api/sync` or `client.is_authenticated() == False`)**:
   - ClassDojo sessions last several weeks/months, but if expired, ClassDojo requires an email One-Time Code (OTC).
   - Run `USE_FIRESTORE=true GOOGLE_CLOUD_PROJECT=herrington-ai-site uv run python -m dojo login --email daniel.j.herrington@gmail.com`, prompt Daniel for the 6-digit email code, and `DojoClient.save_session()` will automatically save the fresh cookies to Firestore (`dojo_config/session`).
+- **Urgent Alert Failed to Send (`urgent_alerts_failed > 0` from `/api/cron/check-alerts`)**:
+  - A failed IMMEDIATE alert stays in `alerts` / `dojo_alerts` with `sent_status="failed: ..."` and an `attempts` counter. [`MessageMonitor`](src/dojo/monitor.py) retries it on every later check (every 10 min in prod) until it is `sent`, it has been tried `MAX_ALERT_ATTEMPTS` (5) times, or the item is more than 24h old. Check SMTP credentials if failures persist.
 - **Custom Domain (`dojo.herrington.ai`) DNS Issues**:
   - Check DNS record via `python3 scripts/cloudflare_dns.py list` (requires `CLOUDFLARE_API_TOKEN` or `~/.cloudflare/token`).
   - Ensure `dojo.herrington.ai` is a `CNAME` pointing to `ghs.googlehosted.com` with `proxied=false`.

@@ -25,6 +25,9 @@ class AlertDecision(BaseModel):
     confidence: float = 1.0
     action_required: Optional[str] = None
     timestamp: Optional[str] = None
+    # Set by MessageMonitor for IMMEDIATE alerts: "sent", "failed: <error>" or "dry_run".
+    delivery_status: Optional[str] = None
+    is_retry: bool = False
 
 
 # Patterns requiring immediate notification

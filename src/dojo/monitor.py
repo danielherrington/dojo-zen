@@ -2,6 +2,7 @@
 
 import time
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from rich.console import Console
 
@@ -13,6 +14,24 @@ from dojo.mailer import Mailer
 
 logger = logging.getLogger(__name__)
 console = Console()
+
+# A failed emergency alert is retried on each later check until it is sent, it has been
+# tried this many times, or the underlying message is older than the retry window.
+MAX_ALERT_ATTEMPTS = 5
+ALERT_RETRY_WINDOW = timedelta(hours=24)
+
+
+def _parse_item_time(raw: Any) -> Optional[datetime]:
+    """Parse a stored ISO timestamp into an aware UTC datetime (None if missing/unparseable)."""
+    if not raw:
+        return None
+    if isinstance(raw, datetime):
+        return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 class MessageMonitor:
@@ -33,10 +52,18 @@ class MessageMonitor:
         self.evaluator = AlertEvaluator(gemini_api_key=self.settings.gemini_api_key)
         self.mailer = Mailer(self.settings)
 
-    def check_once(self, send_email: bool = True, to_email: Optional[str] = None) -> List[AlertDecision]:
+    def check_once(
+        self,
+        send_email: bool = True,
+        to_email: Optional[str] = None,
+        now: Optional[datetime] = None,
+    ) -> List[AlertDecision]:
         """
-        Sync latest items from ClassDojo, evaluate un-alerted items,
-        and dispatch immediate notifications for any urgent messages.
+        Sync latest items from ClassDojo, retry emergency alerts that previously failed to send,
+        evaluate un-alerted items, and dispatch immediate notifications for any urgent messages.
+
+        Each returned IMMEDIATE decision carries ``delivery_status`` ("sent", "failed: ...",
+        or "dry_run") so callers can tell delivered emergencies from failed ones.
         """
         recipient = to_email or self.settings.email_to
         immediate_alerts: List[AlertDecision] = []
@@ -56,7 +83,11 @@ class MessageMonitor:
         except Exception as e:
             logger.warning(f"Warning during monitor sync: {e}")
 
-        # 2. Query items that haven't been evaluated for immediate alerts yet
+        # 2. Retry emergency alerts whose earlier send failed (e.g. transient SMTP error)
+        if send_email and recipient:
+            immediate_alerts.extend(self._retry_failed_alerts(recipient, now=now))
+
+        # 3. Query items that haven't been evaluated for immediate alerts yet
         unalerted = self.db.get_unalerted_items()
         messages = unalerted["messages"]
         feed_items = unalerted["feed_items"]
@@ -77,9 +108,49 @@ class MessageMonitor:
 
         return immediate_alerts
 
-    def _handle_decision(self, decision: AlertDecision, send_email: bool, recipient: Optional[str]) -> None:
-        """Process an alert decision: dispatch if urgent, record status in SQLite."""
-        if self.db.is_already_alerted(decision.item_id):
+    def _retry_failed_alerts(self, recipient: str, now: Optional[datetime] = None) -> List[AlertDecision]:
+        """Re-send IMMEDIATE alerts that failed earlier, within the attempt cap and freshness window."""
+        get_failed = getattr(self.db, "get_failed_alerts", None)
+        if get_failed is None:
+            return []
+        effective_now = now or datetime.now(timezone.utc)
+        if effective_now.tzinfo is None:
+            effective_now = effective_now.replace(tzinfo=timezone.utc)
+
+        retried: List[AlertDecision] = []
+        failed = get_failed(max_attempts=MAX_ALERT_ATTEMPTS)
+        candidates = [("message", m) for m in failed.get("messages", [])] + [
+            ("feed", f) for f in failed.get("feed_items", [])
+        ]
+        for item_type, item in candidates:
+            raw_time = item.get("message_timestamp") if item_type == "message" else item.get("item_timestamp")
+            item_time = _parse_item_time(raw_time)
+            if item_time is not None and effective_now - item_time > ALERT_RETRY_WINDOW:
+                continue  # a day-old emergency is no longer actionable; leave it for the recap
+
+            if item_type == "message":
+                decision = self.evaluator.evaluate_message(item)
+            else:
+                decision = self.evaluator.evaluate_feed_item(item)
+            decision.is_retry = True
+            logger.info(
+                "Retrying failed urgent alert %s (attempt %s)",
+                decision.item_id, int(item.get("alert_attempts") or 1) + 1,
+            )
+            self._handle_decision(decision, send_email=True, recipient=recipient, retry=True)
+            if decision.urgency == UrgencyLevel.IMMEDIATE:
+                retried.append(decision)
+        return retried
+
+    def _handle_decision(
+        self,
+        decision: AlertDecision,
+        send_email: bool,
+        recipient: Optional[str],
+        retry: bool = False,
+    ) -> None:
+        """Process an alert decision: dispatch if urgent, record status in the alert log."""
+        if not retry and self.db.is_already_alerted(decision.item_id):
             return
 
         if decision.urgency == UrgencyLevel.IMMEDIATE:
@@ -95,7 +166,9 @@ class MessageMonitor:
                     console.print(f"[bold green]✓ Sent immediate priority alert to {recipient}![/bold green]")
                 except Exception as e:
                     status = f"failed: {e}"
+                    logger.error("Failed to dispatch urgent alert %s: %s", decision.item_id, e)
                     console.print(f"[bold red]Failed to dispatch immediate alert: {e}[/bold red]")
+            decision.delivery_status = status
 
             self.db.record_alert(
                 item_id=decision.item_id,

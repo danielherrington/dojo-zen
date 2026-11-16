@@ -122,9 +122,16 @@ class DojoDatabase:
                     urgency_level TEXT NOT NULL,
                     sent_at TEXT NOT NULL,
                     recipient_email TEXT,
-                    sent_status TEXT NOT NULL
+                    sent_status TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 1
                 )
             """)
+
+            # Migration: ensure alerts.attempts column exists (failed-alert retry counter)
+            cursor.execute("PRAGMA table_info(alerts)")
+            alert_cols = [r[1] for r in cursor.fetchall()]
+            if "attempts" not in alert_cols:
+                cursor.execute("ALTER TABLE alerts ADD COLUMN attempts INTEGER NOT NULL DEFAULT 1")
 
             # Indexes for querying undigested and alerted records
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_feed_digested ON feed_items(digested_at)")
@@ -479,7 +486,8 @@ class DojoDatabase:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(item_id) DO UPDATE SET
                     sent_status = excluded.sent_status,
-                    sent_at = excluded.sent_at
+                    sent_at = excluded.sent_at,
+                    attempts = alerts.attempts + 1
             """, (
                 str(item_id), item_type, sender_or_author, title,
                 reason, urgency_level, now, recipient_email, sent_status
@@ -511,6 +519,46 @@ class DojoDatabase:
                 "messages": [dict(r) for r in msg_rows],
                 "feed_items": [dict(r) for r in feed_rows],
             }
+
+    def get_failed_alerts(self, max_attempts: int = 5) -> Dict[str, List[Dict[str, Any]]]:
+        """Fetch messages and feed items whose immediate alert failed to send and may be retried.
+
+        Each returned item carries ``alert_attempts`` (sends tried so far); callers use the
+        item's own timestamp to decide whether the emergency is still fresh enough to send.
+        """
+        with self.get_connection() as conn:
+            msg_rows = conn.execute("""
+                SELECT m.*, a.attempts AS alert_attempts
+                FROM alerts a
+                JOIN messages m ON m.id = a.item_id
+                WHERE a.item_type = 'message'
+                  AND a.urgency_level = 'immediate'
+                  AND a.sent_status LIKE 'failed%'
+                  AND a.attempts < ?
+                ORDER BY m.message_timestamp DESC
+            """, (max_attempts,)).fetchall()
+
+            feed_rows = conn.execute("""
+                SELECT f.*, a.attempts AS alert_attempts
+                FROM alerts a
+                JOIN feed_items f ON f.id = a.item_id
+                WHERE a.item_type = 'feed'
+                  AND a.urgency_level = 'immediate'
+                  AND a.sent_status LIKE 'failed%'
+                  AND a.attempts < ?
+                ORDER BY f.item_timestamp DESC
+            """, (max_attempts,)).fetchall()
+
+            return {
+                "messages": [dict(r) for r in msg_rows],
+                "feed_items": [dict(r) for r in feed_rows],
+            }
+
+    def get_alert(self, item_id: str) -> Optional[Dict[str, Any]]:
+        """Return the alert audit record for an item, if any."""
+        with self.get_connection() as conn:
+            row = conn.execute("SELECT * FROM alerts WHERE item_id = ?", (str(item_id),)).fetchone()
+            return dict(row) if row else None
 
     def get_all_feed_items(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         with self.get_connection() as conn:
