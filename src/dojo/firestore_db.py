@@ -344,7 +344,8 @@ class FirestoreDojoDatabase:
     def get_last_sent_digest(self) -> Optional[Dict[str, Any]]:
         """Return the most recently sent digest record, if any."""
         docs = list(
-            self.digest_col.order_by("created_at", direction=firestore.Query.DESCENDING)
+            # "DESCENDING" == google.cloud.firestore.Query.DESCENDING; the module is only imported lazily.
+            self.digest_col.order_by("created_at", direction="DESCENDING")
             .limit(10)
             .stream()
         )

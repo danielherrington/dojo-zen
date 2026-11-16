@@ -44,6 +44,19 @@ class MockCollection:
             snap.to_dict.return_value = doc._data
             yield snap
 
+    def order_by(self, field, direction="ASCENDING"):
+        assert direction in ("ASCENDING", "DESCENDING")
+        query = MockCollection(self.name)
+        ordered = sorted(self.docs.items(), key=lambda kv: kv[1]._data.get(field) or "",
+                         reverse=direction == "DESCENDING")
+        query.docs = dict(ordered)
+        return query
+
+    def limit(self, count):
+        query = MockCollection(self.name)
+        query.docs = dict(list(self.docs.items())[:count])
+        return query
+
     def where(self, field, op, val):
         mock_query = MagicMock()
         filtered = []
@@ -111,3 +124,16 @@ def test_firestore_upsert_and_retrieve():
     stats = fdb.get_stats()
     assert stats["feed_total"] == 1
     assert stats["backend"] == "firestore"
+
+
+def test_get_last_sent_digest_parity():
+    """Regression: get_last_sent_digest referenced an unimported ``firestore`` module (NameError in prod)."""
+    fdb = FirestoreDojoDatabase(project="test-project", client=MockFirestoreClient())
+    assert fdb.get_last_sent_digest() is None
+    common = dict(content_html="<h1>x</h1>", content_text="x", recipient_email="family@example.test", item_count=3)
+    fdb.record_digest(sent_status="sent", created_at="2026-11-13T12:00:00+00:00", **common)
+    fdb.record_digest(sent_status="sent", created_at="2026-11-16T12:00:00+00:00", **common)
+    fdb.record_digest(sent_status="failed: smtp", created_at="2026-11-17T12:00:00+00:00", **common)
+    last = fdb.get_last_sent_digest()
+    assert last is not None
+    assert last["created_at"] == "2026-11-16T12:00:00+00:00"
