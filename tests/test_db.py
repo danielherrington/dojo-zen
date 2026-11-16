@@ -91,11 +91,17 @@ def test_messages_and_events(temp_db):
 
 
 def test_record_digest(temp_db):
+    assert temp_db.get_last_sent_digest() is None
     digest_id = temp_db.record_digest(
         content_html="<h1>Test</h1>",
         content_text="Test",
         recipient_email="parent@example.com",
         item_count=5,
-        sent_status="sent"
+        sent_status="sent",
+        created_at="2026-09-20T18:00:00+00:00",
     )
     assert digest_id > 0
+    last = temp_db.get_last_sent_digest()
+    assert last is not None
+    assert last["recipient_email"] == "parent@example.com"
+    assert last["created_at"] == "2026-09-20T18:00:00+00:00"

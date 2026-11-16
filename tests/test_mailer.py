@@ -229,4 +229,126 @@ def test_dispatch_daily_briefing_skips_quiet_day_and_surfaces_tomorrow_reminders
     assert thu_res["item_count"] >= 1
     assert len(sent_subjects) == 2
 
+    # 4. Second trigger on the same day (Thursday Sep 17 afternoon) -> SKIPPED ("already sent today")
+    thu_dup_res = dispatch_daily_briefing(
+        db=db,
+        settings=custom_settings,
+        force=False,
+        ref_dt=datetime(2026, 9, 17, 17, 0, tzinfo=timezone.utc),
+    )
+    assert thu_dup_res["status"] == "skipped"
+    assert "already sent today" in thu_dup_res["reason"].lower()
+    assert len(sent_subjects) == 2
+
+
+def test_weekend_schedule_skips_saturday_and_sunday_morning_targets_sunday_night(monkeypatch, tmp_path):
+    """
+    Verify weekend email rules:
+    - Saturday (morning & evening): never send automated briefings; preserve Friday/weekend undigested items.
+    - Sunday morning: never send automated briefings; preserve undigested items.
+    - Sunday night (>= 4:00 PM): send first briefing of the week covering Friday/weekend updates + Monday schedule.
+    - Monday morning: skip if Sunday night already covered Monday's items and nothing new arrived overnight.
+    """
+    from datetime import datetime, timezone
+    from dojo.db import DojoDatabase
+    from dojo.mailer import Mailer, dispatch_daily_briefing
+
+    db = DojoDatabase(tmp_path / "test_weekend_dispatch.db")
+    custom_settings = Settings(
+        smtp_host="localhost",
+        smtp_user="test@example.com",
+        smtp_pass="password",
+        email_to="parent@example.com",
+    )
+
+    # Teacher posts a message on Friday afternoon (Sep 18, 2026 at 3:30 PM) + Monday event (Sep 21)
+    db.upsert_messages([
+        {
+            "id": "fri_afternoon_msg",
+            "sender_name": "Ms. Alonso",
+            "body": "Happy Friday families! Please remember to wear sneakers on Monday for PE.",
+            "message_timestamp": "2026-09-18T15:30:00Z",
+        }
+    ])
+    db.upsert_events([
+        {
+            "id": "mon_event",
+            "title": "Book Fair Opens",
+            "description": "Media Center",
+            "start_time": "2026-09-21",
+        }
+    ])
+
+    dispatched = []
+
+    def fake_send_digest(self, briefing, text_content, to_email=None):
+        dispatched.append((briefing.generated_at, briefing.period, text_content))
+        return True
+
+    monkeypatch.setattr(Mailer, "send_digest", fake_send_digest)
+
+    # 1. Saturday morning (Sep 19, 2026 at 7:00 AM) -> SKIPPED, items remain undigested
+    sat_am = dispatch_daily_briefing(
+        db=db,
+        settings=custom_settings,
+        force=False,
+        ref_dt=datetime(2026, 9, 19, 7, 0, tzinfo=timezone.utc),
+    )
+    assert sat_am["status"] == "skipped"
+    assert "saturday" in sat_am["reason"].lower()
+    assert len(dispatched) == 0
+    assert db.get_stats()["undigested_items"] == 2
+
+    # 2. Saturday evening (Sep 19, 2026 at 6:00 PM) -> SKIPPED, items remain undigested
+    sat_pm = dispatch_daily_briefing(
+        db=db,
+        settings=custom_settings,
+        force=False,
+        ref_dt=datetime(2026, 9, 19, 18, 0, tzinfo=timezone.utc),
+    )
+    assert sat_pm["status"] == "skipped"
+    assert "saturday" in sat_pm["reason"].lower()
+    assert len(dispatched) == 0
+    assert db.get_stats()["undigested_items"] == 2
+
+    # 3. Sunday morning (Sep 20, 2026 at 7:00 AM) -> SKIPPED, items remain undigested
+    sun_am = dispatch_daily_briefing(
+        db=db,
+        settings=custom_settings,
+        force=False,
+        ref_dt=datetime(2026, 9, 20, 7, 0, tzinfo=timezone.utc),
+    )
+    assert sun_am["status"] == "skipped"
+    assert "sunday morning" in sun_am["reason"].lower()
+    assert len(dispatched) == 0
+    assert db.get_stats()["undigested_items"] == 2
+
+    # 4. Sunday evening (Sep 20, 2026 at 6:00 PM) -> SENDS first briefing of the week!
+    sun_pm = dispatch_daily_briefing(
+        db=db,
+        settings=custom_settings,
+        force=False,
+        ref_dt=datetime(2026, 9, 20, 18, 0, tzinfo=timezone.utc),
+    )
+    assert sun_pm["status"] == "sent"
+    assert len(dispatched) == 1
+    gen_at, period, body_txt = dispatched[0]
+    assert "Sunday" in gen_at
+    assert period == "Evening"
+    assert "sneakers" in body_txt.lower()
+    assert "book fair opens" in body_txt.lower()
+    assert db.get_stats()["undigested_items"] == 0
+
+    # 5. Monday morning (Sep 21, 2026 at 7:00 AM) with zero new overnight items and no Tuesday items -> SKIPPED!
+    mon_am = dispatch_daily_briefing(
+        db=db,
+        settings=custom_settings,
+        force=False,
+        ref_dt=datetime(2026, 9, 21, 7, 0, tzinfo=timezone.utc),
+    )
+    assert mon_am["status"] == "skipped"
+    assert "sunday evening" in mon_am["reason"].lower()
+    assert len(dispatched) == 1
+
+
 

@@ -133,13 +133,14 @@ Tracked in Linear Project: **dojozen** ([`linear.app/herrington`](https://linear
 
 ## ⏰ Automated Daily Scheduling
 
-In production on Google Cloud Run (`dojo-zen`), Cloud Scheduler triggers `/api/cron/sync` and `/api/cron/daily-briefing` automatically. To run locally via cron on a weekday schedule:
+In production on Google Cloud Run (`dojo-zen`), Cloud Scheduler triggers `/api/cron/daily-digest` on **Sunday evenings at 6:00 PM ET** (`0 18 * * 0` — first briefing for the new school week) and **weekday mornings at 7:00 AM ET** (`0 7 * * 1-5` — Mon–Fri), skipping Saturday and Sunday morning completely. To run locally via cron on the same schedule:
 
 ```bash
 # Open crontab editor
 crontab -e
 
-# Run every weekday at 7:00 AM
+# Run Sunday at 6:00 PM (week-ahead briefing) and Mon-Fri at 7:00 AM
+0 18 * * 0 cd /path/to/dojo-zen && uv run dojo run >> /tmp/dojo.log 2>&1
 0 7 * * 1-5 cd /path/to/dojo-zen && uv run dojo run >> /tmp/dojo.log 2>&1
 ```
 

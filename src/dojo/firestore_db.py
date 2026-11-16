@@ -325,9 +325,10 @@ class FirestoreDojoDatabase:
         content_text: str,
         recipient_email: str,
         item_count: int,
-        sent_status: str
+        sent_status: str,
+        created_at: Optional[str] = None,
     ) -> int:
-        now = utc_now_iso()
+        now = created_at or utc_now_iso()
         doc_ref = self.digest_col.document()
         doc_ref.set({
             "id": doc_ref.id,
@@ -339,6 +340,19 @@ class FirestoreDojoDatabase:
             "sent_status": sent_status,
         })
         return 1
+
+    def get_last_sent_digest(self) -> Optional[Dict[str, Any]]:
+        """Return the most recently sent digest record, if any."""
+        docs = list(
+            self.digest_col.order_by("created_at", direction=firestore.Query.DESCENDING)
+            .limit(10)
+            .stream()
+        )
+        for doc in docs:
+            data = doc.to_dict()
+            if data.get("sent_status") == "sent":
+                return data
+        return None
 
     # --- Urgent Alerts ---
     def is_already_alerted(self, item_id: str) -> bool:

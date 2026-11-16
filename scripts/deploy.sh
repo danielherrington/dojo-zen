@@ -83,22 +83,43 @@ else
     --http-method POST
 fi
 
-# Job B: Daily morning digest at 7:00 AM Eastern Time
+# Job B: Weekday morning digest (Mon–Fri at 7:00 AM Eastern Time; no Saturday or Sunday morning emails)
 if gcloud scheduler jobs describe dojo-daily-digest --location "$REGION" --project "$PROJECT_ID" &>/dev/null; then
-  echo "Updating existing scheduler job 'dojo-daily-digest'..."
+  echo "Updating existing scheduler job 'dojo-daily-digest' (Mon-Fri 7:00 AM ET)..."
   gcloud scheduler jobs update http dojo-daily-digest \
     --location "$REGION" \
     --project "$PROJECT_ID" \
-    --schedule "0 7 * * *" \
+    --schedule "0 7 * * 1-5" \
     --time-zone "America/New_York" \
     --uri "$SERVICE_URL/api/cron/daily-digest?secret=$CRON_SECRET" \
     --http-method POST
 else
-  echo "Creating scheduler job 'dojo-daily-digest'..."
+  echo "Creating scheduler job 'dojo-daily-digest' (Mon-Fri 7:00 AM ET)..."
   gcloud scheduler jobs create http dojo-daily-digest \
     --location "$REGION" \
     --project "$PROJECT_ID" \
-    --schedule "0 7 * * *" \
+    --schedule "0 7 * * 1-5" \
+    --time-zone "America/New_York" \
+    --uri "$SERVICE_URL/api/cron/daily-digest?secret=$CRON_SECRET" \
+    --http-method POST
+fi
+
+# Job C: Sunday evening week-ahead digest (Sunday at 6:00 PM Eastern Time)
+if gcloud scheduler jobs describe dojo-sunday-digest --location "$REGION" --project "$PROJECT_ID" &>/dev/null; then
+  echo "Updating existing scheduler job 'dojo-sunday-digest' (Sun 6:00 PM ET)..."
+  gcloud scheduler jobs update http dojo-sunday-digest \
+    --location "$REGION" \
+    --project "$PROJECT_ID" \
+    --schedule "0 18 * * 0" \
+    --time-zone "America/New_York" \
+    --uri "$SERVICE_URL/api/cron/daily-digest?secret=$CRON_SECRET" \
+    --http-method POST
+else
+  echo "Creating scheduler job 'dojo-sunday-digest' (Sun 6:00 PM ET)..."
+  gcloud scheduler jobs create http dojo-sunday-digest \
+    --location "$REGION" \
+    --project "$PROJECT_ID" \
+    --schedule "0 18 * * 0" \
     --time-zone "America/New_York" \
     --uri "$SERVICE_URL/api/cron/daily-digest?secret=$CRON_SECRET" \
     --http-method POST

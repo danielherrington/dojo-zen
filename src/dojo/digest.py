@@ -133,13 +133,17 @@ def parse_date_or_datetime(val: Any, default_year: Optional[int] = None) -> Opti
 
 
 def is_posted_within_24h(post_dt: Optional[datetime], ref_dt: Optional[datetime] = None) -> bool:
-    """Return True if post_dt is on the same local date as ref_dt or within the preceding 24 hours."""
+    """Return True if post_dt is within the preceding 24h (or posted Friday–Sunday when evaluating Sunday evening's week-ahead briefing)."""
     if ref_dt is None:
         ref_dt = datetime.now().astimezone()
     if post_dt is None:
         return True
     if post_dt.date() == ref_dt.date():
         return True
+    if ref_dt.weekday() == 6 and ref_dt.hour >= 16:
+        days_diff = (ref_dt.date() - post_dt.date()).days
+        if 0 <= days_diff <= 2:
+            return True
     delta_seconds = (ref_dt - post_dt).total_seconds()
     return 0 <= delta_seconds <= 86400
 
@@ -1060,10 +1064,9 @@ class DigestEngine:
         unique_actions = self._deduplicate_actions(action_items)
         unique_dates = self._deduplicate_dates(upcoming_dates)
 
-        local_ref = ref_dt.astimezone()
         return Briefing(
-            generated_at=local_ref.strftime("%A, %b %d, %Y"),
-            period="Morning" if local_ref.hour < 12 else "Evening",
+            generated_at=ref_dt.strftime("%A, %b %d, %Y"),
+            period="Morning" if ref_dt.hour < 12 else "Evening",
             children_names=child_names,
             action_items=unique_actions,
             upcoming_dates=unique_dates,

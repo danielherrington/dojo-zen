@@ -128,6 +128,14 @@ def cmd_sync(args: argparse.Namespace) -> None:
 def cmd_recap(args: argparse.Namespace) -> None:
     """Generate anti-bloat daily briefing and optionally send via email."""
     from dojo.digest import collect_briefing_inputs
+    from dojo.mailer import is_digest_window_allowed
+
+    if args.send_email and not args.force:
+        allowed, window_reason = is_digest_window_allowed()
+        if not allowed:
+            console.print(f"[bold yellow]⏸️ Skipping email dispatch: {window_reason}.[/bold yellow]")
+            console.print("[dim]Use --force to send a recap during the weekend quiet window.[/dim]")
+            return
 
     db = get_db()
     inputs = collect_briefing_inputs(db)

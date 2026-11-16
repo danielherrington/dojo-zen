@@ -411,9 +411,10 @@ class DojoDatabase:
         content_text: str,
         recipient_email: str,
         item_count: int,
-        sent_status: str
+        sent_status: str,
+        created_at: Optional[str] = None,
     ) -> int:
-        now = utc_now_iso()
+        now = created_at or utc_now_iso()
         with self.get_connection() as conn:
             cur = conn.execute("""
                 INSERT INTO digests (created_at, content_html, content_text, recipient_email, item_count, sent_status)
@@ -421,6 +422,14 @@ class DojoDatabase:
             """, (now, content_html, content_text, recipient_email, item_count, sent_status))
             conn.commit()
             return cur.lastrowid or 0
+
+    def get_last_sent_digest(self) -> Optional[Dict[str, Any]]:
+        """Return the most recently sent digest record, if any."""
+        with self.get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM digests WHERE sent_status = 'sent' ORDER BY created_at DESC, id DESC LIMIT 1"
+            ).fetchone()
+            return dict(row) if row else None
 
     def get_stats(self) -> Dict[str, Any]:
         with self.get_connection() as conn:

@@ -33,7 +33,8 @@ It connects directly to ClassDojo's internal web REST APIs, strips out promotion
 | **Database (Local/Test)** | SQLite (`data/dojo.db`) | Default when `USE_FIRESTORE=false` |
 | **Session Persistence** | Firestore `dojo_config/session` & `data/session.json` | Stores ClassDojo cookies (`dojo_login.sid`, `dojo_home_login.sid`) |
 | **Cron: Urgent Alerts** | Cloud Scheduler `dojo-check-alerts` | `*/10 * * * *` (`America/New_York`) → `POST /api/cron/check-alerts?secret=...` |
-| **Cron: Daily Digest** | Cloud Scheduler `dojo-daily-digest` | `0 7 * * *` (`America/New_York`) → `POST /api/cron/daily-digest?secret=...` |
+| **Cron: Weekday Digest** | Cloud Scheduler `dojo-daily-digest` | `0 7 * * 1-5` (`America/New_York`, Mon–Fri 7:00 AM ET) → `POST /api/cron/daily-digest?secret=...` |
+| **Cron: Sunday Digest** | Cloud Scheduler `dojo-sunday-digest` | `0 18 * * 0` (`America/New_York`, Sun 6:00 PM ET week-ahead; no Saturday or Sunday morning emails) → `POST /api/cron/daily-digest?secret=...` |
 
 ---
 

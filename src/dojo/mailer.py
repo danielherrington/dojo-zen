@@ -159,6 +159,29 @@ class Mailer:
             server.quit()
 
 
+def is_digest_window_allowed(ref_dt: Optional[Any] = None) -> tuple[bool, str]:
+    """
+    Determine whether automated daily digest emails are allowed at ref_dt.
+    - Saturday (all day): Skipped (no Saturday briefings).
+    - Sunday before 4:00 PM (hour < 16): Skipped (first weekend briefing is Sunday evening).
+    - Sunday evening (hour >= 16): Allowed (week-ahead / Monday prep briefing).
+    - Monday–Friday: Allowed.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    effective_dt = ref_dt if isinstance(ref_dt, datetime) else datetime.now(ZoneInfo("America/New_York"))
+    weekday = effective_dt.weekday()  # 0=Mon ... 5=Sat, 6=Sun
+
+    if weekday == 5:
+        return False, "Weekend quiet window (Saturday — briefings resume Sunday evening)"
+    if weekday == 6 and effective_dt.hour < 16:
+        return False, "Weekend quiet window (Sunday morning — briefings resume Sunday evening)"
+    if weekday == 6:
+        return True, "Sunday evening week-ahead briefing window"
+    return True, "Weekday briefing window"
+
+
 def dispatch_daily_briefing(
     db: Any,
     settings: Optional[Settings] = None,
@@ -167,11 +190,33 @@ def dispatch_daily_briefing(
     dry_run: bool = False,
     ref_dt: Optional[Any] = None,
 ) -> dict:
-    """Compile and dispatch daily briefing email, skipping quiet days with nothing relevant unless forced."""
+    """Compile and dispatch daily briefing email, enforcing weekend quiet windows and quiet-day skipping unless forced."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
     from dojo.config import settings as default_settings
-    from dojo.digest import DigestEngine, collect_briefing_inputs
+    from dojo.digest import DigestEngine, collect_briefing_inputs, parse_raw_datetime
 
     s = settings or default_settings
+    effective_ref = ref_dt if isinstance(ref_dt, datetime) else datetime.now(ZoneInfo("America/New_York"))
+
+    # 1. Weekend schedule guardrail (never send Saturday or Sunday morning briefings unless forced;
+    #    leave undigested items untouched so they roll into Sunday evening's briefing).
+    if not force:
+        allowed, window_reason = is_digest_window_allowed(effective_ref)
+        if not allowed:
+            return {"status": "skipped", "reason": window_reason, "count": 0}
+
+    # 2. Check last sent digest to prevent duplicate same-day emails
+    last_sent_dt: Optional[datetime] = None
+    if not force and hasattr(db, "get_last_sent_digest"):
+        last_digest = db.get_last_sent_digest()
+        if last_digest and last_digest.get("created_at"):
+            last_sent_dt = parse_raw_datetime(last_digest["created_at"])
+            if last_sent_dt is not None and effective_ref.tzinfo is not None and last_sent_dt.tzinfo is not None:
+                last_sent_dt = last_sent_dt.astimezone(effective_ref.tzinfo)
+            if last_sent_dt is not None and last_sent_dt.date() == effective_ref.date():
+                return {"status": "skipped", "reason": "Daily briefing already sent today", "count": 0}
+
     inputs = collect_briefing_inputs(db)
     undigested = inputs["undigested"]
     feed_items = inputs["feed_items"]
@@ -189,7 +234,7 @@ def dispatch_daily_briefing(
         messages=messages,
         events=events,
         children=children,
-        ref_dt=ref_dt,
+        ref_dt=effective_ref,
         daily_focus=True,
         respect_digested=True,
     )
@@ -197,11 +242,29 @@ def dispatch_daily_briefing(
     u_feed_ids = [str(f["id"]) for f in undigested.get("feed_items", []) if f.get("id")]
     u_msg_ids = [str(m["id"]) for m in undigested.get("messages", []) if m.get("id")]
     u_ev_ids = [str(e["id"]) for e in undigested.get("events", []) if e.get("id")]
+    has_undigested = bool(u_feed_ids or u_msg_ids or u_ev_ids)
 
     if briefing.is_empty() and not force:
-        if not dry_run and (u_feed_ids or u_msg_ids or u_ev_ids):
+        if not dry_run and has_undigested:
             db.mark_items_digested(u_feed_ids, u_msg_ids, u_ev_ids)
         return {"status": "skipped", "reason": "No daily-relevant items for today", "count": 0}
+
+    # 3. If Sunday evening already briefed Monday's items and nothing new arrived overnight (and no Tuesday lookahead items),
+    #    avoid re-sending the exact same Monday reminder 13 hours later on Monday morning.
+    if (
+        not force
+        and effective_ref.weekday() == 0
+        and last_sent_dt is not None
+        and last_sent_dt.date() == (effective_ref.date() - timedelta(days=1))
+        and not has_undigested
+    ):
+        has_tuesday_lookahead = any(
+            a.summary.lower().startswith("tomorrow") for a in briefing.active_action_items
+        ) or any(
+            d.title.lower().startswith("tomorrow") for d in briefing.active_upcoming_dates
+        )
+        if not has_tuesday_lookahead:
+            return {"status": "skipped", "reason": "Already covered in Sunday evening briefing", "count": 0}
 
     daily_count = briefing.daily_item_count
     text_content = engine.format_plain_text(briefing)
@@ -220,10 +283,11 @@ def dispatch_daily_briefing(
         content_text=text_content,
         recipient_email=recipient,
         item_count=daily_count,
-        sent_status="sent" if email_sent else "failed"
+        sent_status="sent" if email_sent else "failed",
+        created_at=effective_ref.isoformat(),
     )
 
-    if u_feed_ids or u_msg_ids or u_ev_ids:
+    if has_undigested:
         db.mark_items_digested(u_feed_ids, u_msg_ids, u_ev_ids)
 
     return {"status": "sent", "item_count": daily_count, "recipient": recipient}

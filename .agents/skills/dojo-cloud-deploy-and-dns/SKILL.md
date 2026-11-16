@@ -19,7 +19,8 @@ description: >-
   - Custom Domain: `https://dojo.herrington.ai`
 - **Cloud Scheduler Jobs** (`us-central1`, timezone `America/New_York`):
   - `dojo-check-alerts`: Runs `*/10 * * * *` → `POST /api/cron/check-alerts?secret=...`
-  - `dojo-daily-digest`: Runs `0 7 * * *` → `POST /api/cron/daily-digest?secret=...`
+  - `dojo-daily-digest`: Runs `0 7 * * 1-5` (Mon–Fri 7:00 AM ET) → `POST /api/cron/daily-digest?secret=...`
+  - `dojo-sunday-digest`: Runs `0 18 * * 0` (Sunday 6:00 PM ET week-ahead briefing; no Saturday or Sunday morning emails) → `POST /api/cron/daily-digest?secret=...`
 
 ## Deploying to Cloud Run
 
