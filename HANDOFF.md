@@ -3,7 +3,7 @@
 **Last Updated:** November 2026  
 **Repository:** `danielherrington/dojo-zen` (`main` branch)  
 **Production URL:** `https://dojo.herrington.ai` (Firebase Hosting `herrington-dojo.web.app` → Cloud Run `dojo-zen` in `us-central1`, GCP project `herrington-ai-site`)  
-**Remote MCP Endpoint:** `https://dojo.herrington.ai/mcp` (Streamable HTTP, unauthenticated)  
+**Remote MCP Endpoint:** `https://dojo.herrington.ai/mcp` (Streamable HTTP; bearer token once `REQUIRE_AUTH=true`, see §7)  
 **Linear Project:** **dojozen** ([`linear.app/herrington`](https://linear.app/herrington/project/classdojo-anti-bloat-agent-dab3a3988132) — `DAN-30` through `DAN-37`)
 
 ---
@@ -175,3 +175,27 @@ curl -s -X POST https://dojo.herrington.ai/api/sync | python3 -m json.tool
 - **Custom Domain (`dojo.herrington.ai`) DNS Issues**:
   - Check DNS record via `python3 scripts/cloudflare_dns.py list` (requires `CLOUDFLARE_API_TOKEN` or `~/.cloudflare/token`).
   - Ensure `dojo.herrington.ai` is a `CNAME` pointing to `ghs.googlehosted.com` with `proxied=false`.
+
+---
+
+## 7. Access Control (DAN-166)
+
+[`src/dojo/auth.py`](src/dojo/auth.py) holds the token gate. It does nothing until `REQUIRE_AUTH=true` is set on Cloud Run, so merging never locks out clients.
+
+| Surface | Auth once `REQUIRE_AUTH=true` |
+| :--- | :--- |
+| `/` (portal) | `__session` cookie set by `/login` (Firebase Hosting forwards only the cookie named `__session`); otherwise redirects to `/login` |
+| `/api/*` data endpoints | `Authorization: Bearer $DOJO_ACCESS_TOKEN` or the `__session` cookie |
+| `/mcp` | Bearer header, the cookie, or `?access_token=` (only for MCP clients that can't send headers) |
+| `/api/status` | Public (counts only) |
+| `/api/sms/webhook` | Valid `X-Twilio-Signature` (HMAC-SHA1 with `TWILIO_AUTH_TOKEN`); unsigned requests are logged and still allowed while `REQUIRE_AUTH` is off |
+| `/api/cron/*` | `CRON_SECRET` always; there's no built-in default, and an empty secret rejects every call |
+
+`DOJO_ACCESS_TOKEN` can hold several comma-separated tokens (for example one per family member or MCP client), so a single token can be revoked.
+
+**Rollout:** (1) set `DOJO_ACCESS_TOKEN`, `TWILIO_AUTH_TOKEN` and `CRON_SECRET` on the `dojo-zen` service; (2) add the bearer header to MCP clients:
+```json
+{ "mcpServers": { "dojo-zen": { "url": "https://dojo.herrington.ai/mcp",
+  "headers": { "Authorization": "Bearer <DOJO_ACCESS_TOKEN>" } } } }
+```
+(3) set `REQUIRE_AUTH=true`. Signing in once on each phone keeps email links working.

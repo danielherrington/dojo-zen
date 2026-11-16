@@ -103,7 +103,7 @@ uv run dojo recap --send-email
 
 Dojo Zen exposes **8 tools** (`get_daily_briefing`, `get_action_items`, `get_upcoming_dates`, `ask_classroom_assistant`, `search_feed`, `get_recent_feed`, `get_feed_item`, `get_enrolled_children`), **4 resources** (`dojo://briefing/today`, `dojo://action-items`, `dojo://calendar/upcoming`, `dojo://feed/recent`), and **2 prompts** (`weekly-school-prep`, `urgent-logistics-check`).
 
-- **Remote Streamable HTTP**: Connect any MCP client to `https://dojo.herrington.ai/mcp` (or `http://localhost:8000/mcp` when running `dojo serve`).
+- **Remote Streamable HTTP**: Connect any MCP client to `https://dojo.herrington.ai/mcp` (or `http://localhost:8000/mcp` when running `dojo serve`). When `REQUIRE_AUTH=true`, send `Authorization: Bearer <DOJO_ACCESS_TOKEN>` (see HANDOFF.md §7).
 - **Local `stdio`**:
   ```json
   {

@@ -764,6 +764,18 @@
   </div>
 
   <script>
+    // DAN-166: if the access session expires, send the family back to the sign-in page.
+    (function () {
+      const origFetch = window.fetch.bind(window);
+      window.fetch = async (...args) => {
+        const res = await origFetch(...args);
+        if (res.status === 401) {
+          const next = encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
+          window.location.href = `/login?next=${next}`;
+        }
+        return res;
+      };
+    })();
     let allFeedItems = [];
     let searchDebounceTimer = null;
 
