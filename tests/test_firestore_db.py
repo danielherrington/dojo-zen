@@ -18,7 +18,12 @@ class MockDocRef:
         return mock_snap
 
     def set(self, data, merge=False):
-        self._data.update(data)
+        from google.cloud.firestore import Increment
+        for key, value in data.items():
+            if isinstance(value, Increment):
+                self._data[key] = (self._data.get(key, 0) if merge else 0) + value.value
+            else:
+                self._data[key] = value
         self._exists = True
 
     def to_dict(self):
@@ -61,6 +66,22 @@ class MockCollection:
         mock_query = MagicMock()
         filtered = []
         for doc in self.docs.values():
+            got = doc._data.get(field)
+            if op == ">=" and got is not None and got >= val:
+                snap = MagicMock()
+                snap.id = doc.id
+                snap.to_dict.return_value = doc._data
+                filtered.append(snap)
+                continue
+            if op == "in":
+                if got in val:
+                    snap = MagicMock()
+                    snap.id = doc.id
+                    snap.to_dict.return_value = doc._data
+                    filtered.append(snap)
+                continue
+            if op != "==":
+                continue
             if val is None and doc._data.get(field) is None:
                 snap = MagicMock()
                 snap.id = doc.id

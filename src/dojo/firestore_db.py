@@ -75,6 +75,18 @@ class FirestoreDojoDatabase:
         return self.client.collection("dojo_alerts")
 
     @property
+    def email_send_col(self):
+        return self.client.collection("dojo_email_sends")
+
+    @property
+    def email_event_col(self):
+        return self.client.collection("dojo_email_events")
+
+    @property
+    def usage_col(self):
+        return self.client.collection("dojo_usage")
+
+    @property
     def config_col(self):
         return self.client.collection("dojo_config")
 
@@ -354,6 +366,45 @@ class FirestoreDojoDatabase:
             if data.get("sent_status") == "sent":
                 return data
         return None
+
+    # --- Email & usage analytics (DAN-200) ---
+    def record_email_send(
+        self, email_id: str, kind: str, subject: str, recipient_count: int, item_count: int, sent_at: str
+    ) -> None:
+        self.email_send_col.document(email_id).set({
+            "email_id": email_id,
+            "kind": kind,
+            "subject": subject,
+            "recipient_count": recipient_count,
+            "item_count": item_count,
+            "sent_at": sent_at,
+        })
+
+    def record_email_event(
+        self, email_id: str, event_type: str, target: Optional[str] = None,
+        client: Optional[str] = None, created_at: Optional[str] = None,
+    ) -> None:
+        self.email_event_col.document().set({
+            "email_id": email_id,
+            "event_type": event_type,
+            "target": target,
+            "client": client,
+            "created_at": created_at or utc_now_iso(),
+        })
+
+    def increment_usage(self, day: str, channel: str, amount: int = 1) -> None:
+        """Atomic per-day counter: dojo_usage/{day} {channel: n}."""
+        from google.cloud.firestore import Increment
+        self.usage_col.document(day).set({"day": day, channel: Increment(amount)}, merge=True)
+
+    def get_analytics_rows(self, since_iso: str, since_day: str) -> Dict[str, List[Dict[str, Any]]]:
+        sends = [d.to_dict() for d in self.email_send_col.where("sent_at", ">=", since_iso).stream()]
+        ids = [s["email_id"] for s in sends if s.get("email_id")]
+        events: List[Dict[str, Any]] = []
+        for i in range(0, len(ids), 30):  # Firestore "in" accepts at most 30 values
+            events += [d.to_dict() for d in self.email_event_col.where("email_id", "in", ids[i:i + 30]).stream()]
+        usage = [d.to_dict() for d in self.usage_col.where("day", ">=", since_day).stream()]
+        return {"sends": sends, "events": events, "usage": usage}
 
     # --- Urgent Alerts ---
     def is_already_alerted(self, item_id: str) -> bool:

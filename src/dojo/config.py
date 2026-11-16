@@ -76,6 +76,14 @@ class Settings(BaseModel):
         default_factory=lambda: os.getenv("REQUIRE_AUTH", "").lower() in ("true", "1", "yes")
     )
 
+    # Analytics (DAN-200): email open/click tracking and per-channel daily usage counters.
+    email_tracking: bool = Field(
+        default_factory=lambda: os.getenv("EMAIL_TRACKING", "true").lower() in ("true", "1", "yes")
+    )
+    usage_analytics: bool = Field(
+        default_factory=lambda: os.getenv("USAGE_ANALYTICS", "true").lower() in ("true", "1", "yes")
+    )
+
     def ensure_directories(self) -> None:
         """Ensure parent directories for session and database files exist."""
         self.dojo_session_file.parent.mkdir(parents=True, exist_ok=True)

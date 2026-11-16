@@ -29,7 +29,7 @@ It connects directly to ClassDojo's internal web REST APIs, strips out promotion
 | **Cloud Run Service** | `dojo-zen` (`us-central1`) | `https://dojo-zen-647998166555.us-central1.run.app` (512Mi RAM, 0–2 instances) |
 | **Firebase Hosting** | Site `herrington-dojo` (target `dojo`) | Configured in [`firebase.json`](firebase.json) & [`.firebaserc`](.firebaserc); rewrites `**` and `/mcp/**` to `dojo-zen` |
 | **Custom Domain & DNS** | `https://dojo.herrington.ai` | Cloudflare CNAME `dojo.herrington.ai -> ghs.googlehosted.com` (`proxied=false` DNS-only), managed via [`scripts/cloudflare_dns.py`](scripts/cloudflare_dns.py) |
-| **Database (Prod)** | Cloud Firestore (`(default)`) | Enabled when `USE_FIRESTORE=true`. Collections: `dojo_children`, `dojo_classes`, `dojo_feed_items`, `dojo_messages`, `dojo_events`, `dojo_digests`, `dojo_alerts`, `dojo_config` |
+| **Database (Prod)** | Cloud Firestore (`(default)`) | Enabled when `USE_FIRESTORE=true`. Collections: `dojo_children`, `dojo_classes`, `dojo_feed_items`, `dojo_messages`, `dojo_events`, `dojo_digests`, `dojo_alerts`, `dojo_email_sends`, `dojo_email_events`, `dojo_usage`, `dojo_config` |
 | **Database (Local/Test)** | SQLite (`data/dojo.db`) | Default when `USE_FIRESTORE=false` |
 | **Session Persistence** | Firestore `dojo_config/session` & `data/session.json` | Stores ClassDojo cookies (`dojo_login.sid`, `dojo_home_login.sid`) |
 | **Cron: Urgent Alerts** | Cloud Scheduler `dojo-check-alerts` | `*/10 * * * *` (`America/New_York`) → `POST /api/cron/check-alerts` with `Authorization: Bearer $CRON_SECRET` |
@@ -193,6 +193,7 @@ curl -s -X POST https://dojo.herrington.ai/api/sync | python3 -m json.tool
 | `/mcp` | Bearer header, the cookie, or `?access_token=` (only for MCP clients that can't send headers) |
 | `/api/status` | Public (counts only) |
 | `/api/sms/webhook` | Valid `X-Twilio-Signature` (HMAC-SHA1 with `TWILIO_AUTH_TOKEN`); unsigned requests are logged and still allowed while `REQUIRE_AUTH` is off |
+| `/t/o/*`, `/t/c/*` | Public email open pixel and click redirect (DAN-200): they take only random 32-hex email ids, store no IPs or user-agents, return no data, and redirect only to same-site paths |
 | `/api/cron/*` | `CRON_SECRET` always; there's no built-in default, and an empty secret rejects every call |
 
 **Where secrets live (rotated 2026-11-16):** `CRON_SECRET` and `DOJO_ACCESS_TOKEN` are env vars on the `dojo-zen` Cloud Run service. Copies are in Daniel's macOS Keychain (service `dojo-zen`, accounts `CRON_SECRET` / `DOJO_ACCESS_TOKEN`; read one with `security find-generic-password -s dojo-zen -a CRON_SECRET -w`). `CRON_SECRET` is also a GitHub Actions secret used by the scheduler-sync step. Never commit them. To rotate `CRON_SECRET`, change all three, then re-run the scheduler sync (`scripts/deploy.sh` or the workflow).
@@ -205,3 +206,18 @@ curl -s -X POST https://dojo.herrington.ai/api/sync | python3 -m json.tool
   "headers": { "Authorization": "Bearer <DOJO_ACCESS_TOKEN>" } } } }
 ```
 (3) set `REQUIRE_AUTH=true`. Signing in once on each phone keeps email links working.
+
+
+## 8. Email & Usage Analytics (DAN-200)
+
+[`src/dojo/analytics.py`](src/dojo/analytics.py) adds best-effort analytics. A failure to record never blocks an email or a request.
+
+- **Email opens and clicks.** Each briefing and alert sent through `Mailer(settings, db=...)` gets a random `email_id`. Portal links are rewritten to `/t/c/{id}?u=<path>`, and a 1×1 pixel `/t/o/{id}.gif` is appended. Each send is logged in `email_sends` / `dojo_email_sends`, and each open or click in `email_events` / `dojo_email_events`.
+- **Usage patterns.** `UsageMiddleware` keeps one counter per channel per family-timezone day in `usage_daily` / `dojo_usage/{YYYY-MM-DD}`. The channels are `portal_view`, `api`, `ask`, `mcp` (POST calls) and `sms`. Requests rejected with a 4xx/5xx aren't counted.
+- **Summary.** `GET /api/analytics?days=30` (token-gated under `/api/*`) returns open and click rates by kind, median minutes to first open, opens by hour, top click targets, and daily usage by channel.
+- **Kill switches.** `EMAIL_TRACKING=false` and `USAGE_ANALYTICS=false`.
+- **Limits.**
+  - Apple Mail Privacy Protection inflates opens.
+  - Gmail caches the pixel, so repeat opens are under-counted.
+  - One message goes to every recipient, so an open means someone in the family opened it.
+  - A click counts as an open even when images are blocked.

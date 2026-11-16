@@ -156,4 +156,5 @@ Data is stored locally in `data/dojo.db` (SQLite) or in Google Cloud Firestore w
 - **`messages` / `dojo_messages`**: `id`, `conversation_id`, `sender_name`, `body`, `message_timestamp`, `digested_at`
 - **`events` / `dojo_events`**: `id`, `title`, `description`, `start_time`, `end_time`, `digested_at`
 - **`digests` / `dojo_digests`**: `id`, `created_at`, `content_html`, `content_text`, `recipient_email`, `sent_status`
+- **`email_sends` / `dojo_email_sends`**, **`email_events` / `dojo_email_events`**, **`usage_daily` / `dojo_usage`**: Email open/click analytics and per-channel daily usage counters, summarised at `GET /api/analytics` (DAN-200, see HANDOFF.md §8).
 - **`alerts` / `dojo_alerts`** & **`dojo_config/session`** (Firestore): Urgent alert audit log and persisted ClassDojo session cookies.
