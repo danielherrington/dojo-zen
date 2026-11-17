@@ -312,6 +312,46 @@ def get_enrolled_children() -> List[Dict[str, Any]]:
     return result
 
 
+# --- School & Family Logistics (DAN-251), read-only ---
+
+@mcp.tool()
+def school_today(date: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Per-child school summary for a day: school events plus action items due today/tomorrow.
+    Children whose school isn't connected yet come back with status "not_connected".
+
+    Args:
+        date: "today" (default), "tomorrow", or YYYY-MM-DD.
+    """
+    from dojo import logistics
+    return logistics.school_today(_get_db(), date)
+
+
+@mcp.tool()
+def school_upcoming(days: int = 14, start: Optional[str] = None) -> Dict[str, Any]:
+    """Upcoming school dates: days off, early dismissals, deadlines and events (title and date only).
+
+    Args:
+        days: How many days ahead to look (1-60, default 14).
+        start: First day, "today" (default) or YYYY-MM-DD.
+    """
+    from dojo import logistics
+    return logistics.school_upcoming(_get_db(), days=days, start=start)
+
+
+@mcp.tool()
+def pickup_owner(date: Optional[str] = None, kind: str = "any") -> Dict[str, Any]:
+    """Who has school pickup or drop-off on a date. The owner is the Family calendar the event
+    instance sits on (recurring events are expanded).
+
+    Args:
+        date: "today" (default), "tomorrow", or YYYY-MM-DD.
+        kind: "any" (default), "pickup" or "dropoff".
+    """
+    from dojo import logistics
+    children = [k["child"] for k in logistics.family_schools(_get_db())]
+    return logistics.pickup_owner(date, kind=kind, children=children)
+
+
 # ---------------------------------------------------------------------------
 # MCP Resources
 # ---------------------------------------------------------------------------

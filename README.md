@@ -115,6 +115,13 @@ DojoZen follows the herrington.usage.v1 analytics standard (DAN-200, DAN-205, DA
 
 Dojo Zen exposes **8 tools** (`get_daily_briefing`, `get_action_items`, `get_upcoming_dates`, `ask_classroom_assistant`, `search_feed`, `get_recent_feed`, `get_feed_item`, `get_enrolled_children`), **4 resources** (`dojo://briefing/today`, `dojo://action-items`, `dojo://calendar/upcoming`, `dojo://feed/recent`), and **2 prompts** (`weekly-school-prep`, `urgent-logistics-check`).
 
+**School & Family Logistics (DAN-251)** adds 3 read-only tools:
+- `school_today(date?)`: per-child events and action items due today or tomorrow.
+- `school_upcoming(days=14)`: days off, early dismissals, deadlines and events.
+- `pickup_owner(date?, kind?)`: who has pickup or drop-off. The owner is the Family calendar the event instance sits on.
+
+Children, schools and calendar feeds come from env (`FAMILY_SCHOOLS`, `FAMILY_PICKUP_CALENDARS`), never code. `pickup_owner` refuses on Cloud Run until `REQUIRE_AUTH=true`. Tool-catalog metadata is at `/.well-known/mcp-catalog.json` (`src/dojo/mcp_catalog.json`).
+
 - **Remote Streamable HTTP**: Connect any MCP client to `https://dojo.herrington.ai/mcp` (or `http://localhost:8000/mcp` when running `dojo serve`). When `REQUIRE_AUTH=true`, send `Authorization: Bearer <DOJO_ACCESS_TOKEN>` (see HANDOFF.md §7).
 - **Local `stdio`**:
   ```json
