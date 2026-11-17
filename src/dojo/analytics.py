@@ -27,10 +27,21 @@ from urllib.parse import quote, urlsplit
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from dojo.tz import family_now, family_tz, to_family_tz
+from dojo.usage_v1 import GUARD_PREFIX, PREVENTED_ALERT, TRIAGE_PREFIX
 
 logger = logging.getLogger(__name__)
 
 EMAIL_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+# Core journeys (DAN-233). Steps in order; "opened" includes clicks (images may be blocked).
+FUNNELS = {
+    "alert": ("sent", "opened", "action_taken"),   # action_taken = clicked through to the flagged item
+    "digest": ("sent", "opened", "link_clicked"),
+}
+
+
+def funnel_click_step(kind: Optional[str], target: Optional[str]) -> str:
+    return "action_taken" if kind == "alert" and target and "item=" in target else "link_clicked"
 EVENT_OPEN = "open"
 EVENT_CLICK = "click"
 
@@ -101,9 +112,14 @@ def client_category(user_agent: Optional[str]) -> str:
 _HREF_RE = re.compile(r'href="([^"]*)"')
 
 
-def instrument_html(html: str, email_id: str, base_url: str) -> str:
-    """Rewrite portal links to the click tracker and append the open pixel."""
+def instrument_html(html: str, email_id: str, base_url: str, kind: Optional[str] = None) -> str:
+    """Rewrite portal links to the click tracker and append the open pixel.
+
+    ``kind`` (digest/alert) rides along as ``k=`` so open/click events can be attributed to a funnel
+    without a database read.
+    """
     base = base_url.rstrip("/")
+    k = f"&k={kind}" if kind in FUNNELS else ""
     split_base = urlsplit(base)
 
     def _rewrite(match: "re.Match[str]") -> str:
@@ -116,12 +132,12 @@ def instrument_html(html: str, email_id: str, base_url: str) -> str:
             path += f"?{target.query}"
         if target.fragment:
             path += f"#{target.fragment}"
-        tracked = f"{base}/t/c/{email_id}?u={quote(path, safe='')}"
+        tracked = f"{base}/t/c/{email_id}?u={quote(path, safe='')}{k}"
         return f'href="{html_lib.escape(tracked, quote=True)}"'
 
     instrumented = _HREF_RE.sub(_rewrite, html)
     pixel = (
-        f'<img src="{base}/t/o/{email_id}.gif" width="1" height="1" alt="" '
+        f'<img src="{base}/t/o/{email_id}.gif{"?k=" + kind if k else ""}" width="1" height="1" alt="" '
         f'style="display:block;width:1px;height:1px;border:0;" />'
     )
     if "</body>" in instrumented:
@@ -145,6 +161,9 @@ def record_send_safely(
         )
     except Exception as e:  # analytics must never block a send
         logger.warning(f"Could not record email send for analytics: {e}")
+    from dojo.usage_v1 import emit
+    emit("funnel_step", "email", funnel=kind, step="sent",
+         props={"email_id": email_id, "recipient_count": recipient_count, "item_count": item_count})
 
 
 # --- Usage counters ---
@@ -198,8 +217,10 @@ class UsageMiddleware:
         try:
             await self.app(scope, receive, _send)
         finally:
-            if status["code"] < 400 and self.recorder is not None:
-                self._record(family_now().date().isoformat(), channel)
+            if status["code"] < 400:
+                if self.recorder is not None:
+                    self._record(family_now().date().isoformat(), channel)
+                _emit_feature_used(scope, channel)
 
     def _record(self, day: str, channel: str) -> None:
         def _do() -> None:
@@ -215,6 +236,15 @@ class UsageMiddleware:
             asyncio.get_running_loop().run_in_executor(None, _do)
         except RuntimeError:
             _do()
+
+
+def _emit_feature_used(scope: Scope, channel: str) -> None:
+    from dojo.auth import SESSION_COOKIE, _bearer, _cookie
+    from dojo.usage_v1 import actor_hash, emit, v1_channel
+
+    headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+    token = _bearer(headers.get("authorization")) or _cookie(headers.get("cookie"), SESSION_COOKIE)
+    emit("feature_used", v1_channel(channel, headers.get("user-agent")), feature=channel, actor=actor_hash(token))
 
 
 # --- Summary ---
@@ -259,6 +289,7 @@ def summarize(
 
     first_open: Dict[str, datetime] = {}
     clicked: set = set()
+    item_clicked: set = set()
     clicks_by_kind: Counter = Counter()
     targets: Counter = Counter()
     opens_by_hour: Counter = Counter()
@@ -275,6 +306,8 @@ def summarize(
                 first_open[e["email_id"]] = at
         elif e.get("event_type") == EVENT_CLICK:
             clicked.add(e["email_id"])
+            if "item=" in (e.get("target") or ""):
+                item_clicked.add(e["email_id"])
             clicks_by_kind[sent.get("kind", "other")] += 1
             targets[_target_label(e.get("target"))] += 1
 
@@ -305,12 +338,20 @@ def summarize(
     since_day = to_family_tz(since).date().isoformat()
     daily: Dict[str, Dict[str, int]] = defaultdict(dict)
     totals: Counter = Counter()
+    triage_categories: Counter = Counter()
+    guard_counts: Counter = Counter()
     for row in usage:
         day = row.get("day")
         if not day or day < since_day:
             continue
         for channel, count in row.items():
             if channel == "day" or not isinstance(count, (int, float)):
+                continue
+            if channel.startswith(TRIAGE_PREFIX):
+                triage_categories[channel[len(TRIAGE_PREFIX):]] += int(count)
+                continue
+            if channel.startswith(GUARD_PREFIX):
+                guard_counts[channel[len(GUARD_PREFIX):]] += int(count)
                 continue
             daily[day][channel] = daily[day].get(channel, 0) + int(count)
             totals[channel] += int(count)
@@ -330,6 +371,12 @@ def summarize(
             "opens_by_client": dict(opens_by_client),
             "top_click_targets": dict(targets.most_common(10)),
         },
+        "funnels": _funnels(sends_by_id, opened, item_clicked, clicked),
+        "triage": {
+            "categories": dict(triage_categories.most_common()),
+            "false_alarm_guards": {k: v for k, v in guard_counts.most_common() if k != PREVENTED_ALERT},
+            "alerts_prevented_by_guards": guard_counts.get(PREVENTED_ALERT, 0),
+        },
         "usage": {
             "totals": dict(totals),
             "daily": [{"day": d, **daily[d]} for d in sorted(daily)],
@@ -343,6 +390,25 @@ def summarize(
     }
 
 
+def _funnels(sends_by_id: Dict[str, Dict[str, Any]], opened: set, item_clicked: set, clicked: set) -> Dict[str, Any]:
+    """Step counts and conversion for each core-journey funnel, from the 90-day email rows."""
+    out: Dict[str, Any] = {}
+    for kind, steps in FUNNELS.items():
+        ids = {i for i, s in sends_by_id.items() if s.get("kind") == kind}
+        last_step = item_clicked if kind == "alert" else clicked
+        counts = [len(ids), len(ids & opened), len(ids & last_step)]
+        out[kind] = [
+            {
+                "step": step,
+                "count": n,
+                "from_previous": _rate(n, counts[i - 1]) if i else None,
+                "from_start": _rate(n, counts[0]) if i else None,
+            }
+            for i, (step, n) in enumerate(zip(steps, counts))
+        ]
+    return out
+
+
 def _busiest_weekday(daily: Dict[str, Dict[str, int]]) -> Optional[str]:
     by_weekday: Counter = Counter()
     for day, counts in daily.items():
@@ -351,3 +417,66 @@ def _busiest_weekday(daily: Dict[str, Dict[str, int]]) -> Optional[str]:
         except ValueError:
             continue
     return by_weekday.most_common(1)[0][0] if by_weekday else None
+
+
+# --- Analyst report (DAN-233): `dojo analytics report [--days 7] [--json]` ---
+
+REPORT_GAPS = [
+    "Active users / D1-D7-D30 retention: actors exist only in herrington.usage.v1 log events "
+    "(BigQuery sink not set up yet), not in Firestore aggregates.",
+    "error / zero_result events and p50/p95 durations are not tracked yet.",
+    "Per-MCP-tool feature use is not tracked yet (only the mcp channel as a whole).",
+]
+
+
+def build_report(db: Any, days: int = 7, now: Optional[datetime] = None) -> Dict[str, Any]:
+    now = now or datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+    rows = db.get_analytics_rows(since.isoformat(), to_family_tz(since).date().isoformat())
+    report = summarize(rows["sends"], rows["events"], rows["usage"], days=days, now=now)
+    report["gaps"] = REPORT_GAPS
+    return report
+
+
+def _pct(x: Optional[float]) -> str:
+    return "  —  " if x is None else f"{x * 100:5.1f}%"
+
+
+def format_report(r: Dict[str, Any]) -> str:
+    lines = [f"DojoZen analytics: last {r['window_days']} days (since {r['since'][:10]}, {r['timezone']})", ""]
+
+    lines.append("Daily activity by channel")
+    channels = sorted(r["usage"]["totals"])
+    if r["usage"]["daily"]:
+        lines.append("  " + "day".ljust(12) + "".join(c.rjust(13) for c in channels))
+        for row in r["usage"]["daily"]:
+            lines.append("  " + row["day"].ljust(12) + "".join(str(row.get(c, 0)).rjust(13) for c in channels))
+    else:
+        lines.append("  (no activity recorded)")
+    lines.append("")
+
+    lines.append("Funnels (step count, conversion from previous step / from start)")
+    for name, steps in r["funnels"].items():
+        lines.append(f"  {name}")
+        for s in steps:
+            lines.append(f"    {s['step'].ljust(14)}{str(s['count']).rjust(5)}   {_pct(s['from_previous'])} / {_pct(s['from_start'])}")
+    lines.append("")
+
+    lines.append("Features by use (top to bottom)")
+    totals = sorted(r["usage"]["totals"].items(), key=lambda kv: -kv[1])
+    lines += [f"  {k.ljust(14)}{str(v).rjust(6)}" for k, v in totals] or ["  (none)"]
+    lines.append("")
+
+    t = r["triage"]
+    lines.append("Alert triage: categories fired")
+    lines += [f"  {k.ljust(16)}{str(v).rjust(6)}" for k, v in t["categories"].items()] or ["  (none)"]
+    lines.append("False-alarm guards (keyword matches suppressed)")
+    lines += [f"  {k.ljust(16)}{str(v).rjust(6)}" for k, v in t["false_alarm_guards"].items()] or ["  (none)"]
+    lines.append(f"  alerts prevented by guards: {t['alerts_prevented_by_guards']}")
+    lines.append("")
+
+    lines.append("Not measured yet")
+    lines += [f"  - {g}" for g in r.get("gaps", [])]
+    lines.append("Caveats")
+    lines += [f"  - {c}" for c in r["caveats"]]
+    return "\n".join(lines)

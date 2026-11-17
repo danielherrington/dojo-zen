@@ -28,6 +28,9 @@ class AlertDecision(BaseModel):
     # Set by MessageMonitor for IMMEDIATE alerts: "sent", "failed: <error>" or "dry_run".
     delivery_status: Optional[str] = None
     is_retry: bool = False
+    # Analytics (DAN-233): which triage rule fired, and which false-alarm guards suppressed a keyword match.
+    category: str = "unknown"
+    guards: List[str] = Field(default_factory=list)
 
 
 # Patterns requiring immediate notification
@@ -143,7 +146,7 @@ def _any(patterns: List[str], text: str) -> bool:
     return any(re.search(p, text) for p in patterns)
 
 
-def find_guarded_match(patterns: List[str], text: str) -> Optional[str]:
+def find_guarded_match(patterns: List[str], text: str, suppressed: Optional[List[str]] = None) -> Optional[str]:
     """Return the first pattern that matches ``text`` and survives the false-alarm guards.
 
     Each sentence is checked on its own; inside a sentence, negation is scoped to the clause
@@ -160,11 +163,16 @@ def find_guarded_match(patterns: List[str], text: str) -> Optional[str]:
                 m = re.search(pattern, clause)
                 if not m:
                     continue
+                guard = None
                 if _is_negated(clause, m.start()):
-                    continue
-                if policy and not strong:
-                    continue
-                if pattern in BARE_URGENCY_PATTERNS and paperwork and not strong:
+                    guard = "negation"
+                elif policy and not strong:
+                    guard = "policy_reminder"
+                elif pattern in BARE_URGENCY_PATTERNS and paperwork and not strong:
+                    guard = "paperwork"
+                if guard:
+                    if suppressed is not None and guard not in suppressed:
+                        suppressed.append(guard)
                     continue
                 return pattern
     return None
@@ -192,13 +200,15 @@ class AlertEvaluator:
                 body=body,
                 urgency=UrgencyLevel.BLOAT,
                 reason="Marketing or promotional noise",
+                category="bloat",
                 timestamp=time_val
             )
 
         lower = body.lower()
+        guards: List[str] = []
 
         # Check 1: Health & Medical Safety
-        pattern = find_guarded_match(HEALTH_EMERGENCY_PATTERNS, lower)
+        pattern = find_guarded_match(HEALTH_EMERGENCY_PATTERNS, lower, guards)
         if pattern:
             return AlertDecision(
                 item_id=msg_id,
@@ -208,12 +218,14 @@ class AlertEvaluator:
                 body=body,
                 urgency=UrgencyLevel.IMMEDIATE,
                 reason=f"Health/Safety keyword detected ('{pattern}')",
+                category="health",
+                guards=guards,
                 action_required="Check on your child or contact the school/nurse",
                 timestamp=time_val
             )
 
         # Check 2: Same-day logistics & pickup
-        pattern = find_guarded_match(SAME_DAY_LOGISTICS_PATTERNS, lower)
+        pattern = find_guarded_match(SAME_DAY_LOGISTICS_PATTERNS, lower, guards)
         if pattern:
             return AlertDecision(
                 item_id=msg_id,
@@ -223,12 +235,14 @@ class AlertEvaluator:
                 body=body,
                 urgency=UrgencyLevel.IMMEDIATE,
                 reason=f"Same-day logistics notice ('{pattern}')",
+                category="logistics",
+                guards=guards,
                 action_required="Review pickup or transport schedule",
                 timestamp=time_val
             )
 
         # Check 3: Direct phone/contact request from teacher
-        pattern = find_guarded_match(IMMEDIATE_TEACHER_REQUEST_PATTERNS, lower)
+        pattern = find_guarded_match(IMMEDIATE_TEACHER_REQUEST_PATTERNS, lower, guards)
         if pattern:
             return AlertDecision(
                 item_id=msg_id,
@@ -238,6 +252,8 @@ class AlertEvaluator:
                 body=body,
                 urgency=UrgencyLevel.IMMEDIATE,
                 reason="Teacher requested immediate communication",
+                category="teacher_request",
+                guards=guards,
                 action_required="Call or reply to the teacher as soon as possible",
                 timestamp=time_val
             )
@@ -251,6 +267,8 @@ class AlertEvaluator:
             body=body,
             urgency=UrgencyLevel.ROUTINE,
             reason="Routine communication; queued for daily recap briefing",
+            category="routine",
+            guards=guards,
             timestamp=time_val
         )
 
@@ -271,6 +289,7 @@ class AlertEvaluator:
                 body=body,
                 urgency=UrgencyLevel.BLOAT,
                 reason="Marketing or promotional noise",
+                category="bloat",
                 timestamp=time_val
             )
 
@@ -287,6 +306,7 @@ class AlertEvaluator:
                     body=body,
                     urgency=UrgencyLevel.IMMEDIATE,
                     reason=f"Urgent same-day schedule change ('{pattern}')",
+                    category="school_closure",
                     action_required="Check school closure or pickup plan",
                     timestamp=time_val
                 )
@@ -301,6 +321,7 @@ class AlertEvaluator:
                     body=body,
                     urgency=UrgencyLevel.IMMEDIATE,
                     reason="Urgent health notice posted",
+                    category="health_notice",
                     action_required="Review health advisory",
                     timestamp=time_val
                 )
@@ -313,5 +334,6 @@ class AlertEvaluator:
             body=body,
             urgency=UrgencyLevel.ROUTINE,
             reason="Standard story post; queued for daily recap briefing",
+            category="routine",
             timestamp=time_val
         )

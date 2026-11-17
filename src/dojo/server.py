@@ -23,12 +23,15 @@ from dojo.auth import (
 from dojo.analytics import (
     EVENT_CLICK,
     EVENT_OPEN,
+    FUNNELS,
     PIXEL_GIF,
     UsageMiddleware,
     client_category,
+    funnel_click_step,
     is_email_id,
     summarize,
 )
+from dojo.usage_v1 import emit
 from dojo.db import get_database
 from dojo.client import DojoClient, sync_roster
 from dojo.digest import DigestEngine, parse_and_format_timestamp
@@ -515,9 +518,16 @@ async def cron_daily_digest(
 _NO_STORE = {"Cache-Control": "no-store, private, max-age=0"}
 
 
-def _record_email_event(email_id: str, event_type: str, target: Optional[str], user_agent: Optional[str]) -> None:
+def _record_email_event(
+    email_id: str, event_type: str, target: Optional[str], user_agent: Optional[str], kind: Optional[str] = None
+) -> None:
     if not settings.email_tracking or not is_email_id(email_id) or not hasattr(db, "record_email_event"):
         return
+    # herrington.usage.v1 funnel step (DAN-233). No actor: each email goes to the whole family.
+    funnel = kind if kind in FUNNELS else "email"
+    step = "opened" if event_type == EVENT_OPEN else funnel_click_step(kind, target)
+    emit("funnel_step", "email", funnel=funnel, step=step,
+         props={"email_id": email_id, "client": client_category(user_agent)})
     try:
         db.record_email_event(email_id, event_type, target=target, client=client_category(user_agent))
     except Exception as e:
@@ -525,15 +535,18 @@ def _record_email_event(email_id: str, event_type: str, target: Optional[str], u
 
 
 @app.get("/t/o/{email_id}.gif", include_in_schema=False)
-async def track_open(email_id: str, user_agent: Optional[str] = Header(None)):
-    _record_email_event(email_id, EVENT_OPEN, None, user_agent)
+async def track_open(email_id: str, k: Optional[str] = Query(None), user_agent: Optional[str] = Header(None)):
+    _record_email_event(email_id, EVENT_OPEN, None, user_agent, kind=k)
     return Response(content=PIXEL_GIF, media_type="image/gif", headers=_NO_STORE)
 
 
 @app.get("/t/c/{email_id}", include_in_schema=False)
-async def track_click(email_id: str, u: Optional[str] = Query(None), user_agent: Optional[str] = Header(None)):
+async def track_click(
+    email_id: str, u: Optional[str] = Query(None), k: Optional[str] = Query(None),
+    user_agent: Optional[str] = Header(None),
+):
     target = safe_next(u)  # same-site paths only: never an open redirect
-    _record_email_event(email_id, EVENT_CLICK, target, user_agent)
+    _record_email_event(email_id, EVENT_CLICK, target, user_agent, kind=k)
     return RedirectResponse(target, status_code=302, headers=_NO_STORE)
 
 
