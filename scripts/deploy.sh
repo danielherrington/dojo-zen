@@ -20,10 +20,9 @@ PYTHONPATH=src uv run python -m dojo seed-firestore
 # 2. Deploy Cloud Run Service
 echo ""
 echo "☁️ Step 2: Building & Deploying Cloud Run Service '$SERVICE_NAME'..."
-ENV_FLAG=()
-if [ -f ".env.yaml" ]; then
-  ENV_FLAG=(--env-vars-file .env.yaml)
-fi
+# No env flags: the live service keeps its config (REQUIRE_AUTH, Secret Manager references).
+# --env-vars-file would REPLACE every env var and could silently turn auth off. Change config
+# with `gcloud run services update --update-env-vars` / --update-secrets instead.
 
 gcloud run deploy "$SERVICE_NAME" \
   --source . \
@@ -33,8 +32,7 @@ gcloud run deploy "$SERVICE_NAME" \
   --memory 512Mi \
   --cpu 1 \
   --min-instances 0 \
-  --max-instances 2 \
-  "${ENV_FLAG[@]}"
+  --max-instances 2
 
 # Get Cloud Run Service URL
 SERVICE_URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --project "$PROJECT_ID" --format 'value(status.url)')
