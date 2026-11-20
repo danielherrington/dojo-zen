@@ -1,0 +1,33 @@
+{
+  "id": "dojo-zen",
+  "name": "School & Family Logistics (Dojo Zen)",
+  "linear": ["DAN-251", "DAN-244"],
+  "repo": "https://github.com/danielherrington/dojo-zen",
+  "endpoint": "https://dojo.herrington.ai/mcp",
+  "transports": ["streamable-http", "stdio"],
+  "auth_model": "Bearer DOJO_ACCESS_TOKEN (header, __session cookie, or ?access_token= for /mcp). Enforced only when REQUIRE_AUTH=true; pickup_owner refuses on Cloud Run until it is.",
+  "access": "read-only",
+  "approval_requirements": "none (no write tools)",
+  "owner_agent": "claude (DojoZen Claude Code session)",
+  "health_check": "https://dojo.herrington.ai/api/status",
+  "last_health_check": null,
+  "data_sources": {
+    "dojo": "ClassDojo via Dojo Zen sync (connected)",
+    "lehrman": "not connected",
+    "family_calendars": "private iCal feeds via FAMILY_PICKUP_CALENDARS (not configured)"
+  },
+  "tools": [
+    {"name": "school_today", "access": "read", "summary": "Per-child school events and action items due today/tomorrow"},
+    {"name": "school_upcoming", "access": "read", "summary": "Days off, early dismissals, deadlines and events in the next N days"},
+    {"name": "pickup_owner", "access": "read", "summary": "Who has pickup/drop-off on a date (owner = Family calendar the instance sits on)"},
+    {"name": "get_daily_briefing", "access": "read"},
+    {"name": "get_action_items", "access": "read"},
+    {"name": "get_upcoming_dates", "access": "read"},
+    {"name": "ask_classroom_assistant", "access": "read"},
+    {"name": "search_feed", "access": "read"},
+    {"name": "get_recent_feed", "access": "read"},
+    {"name": "get_feed_item", "access": "read"},
+    {"name": "get_enrolled_children", "access": "read"}
+  ],
+  "privacy": "Children's names, schools and calendar feeds come from env, not code. Tools return summaries only: no message bodies, photos, attachments or sender names."
+}

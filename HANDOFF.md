@@ -281,3 +281,20 @@ gcloud firestore fields ttls list --project=herrington-ai-site
   - `MessageMonitor` counts each item's first evaluation as `triage__<category>` and `guard__<guard>` on `dojo_usage/{day}`, plus `guard__prevented_alert` when guards stopped every match.
 - **Report.** `uv run dojo analytics report --days 7`. Add `USE_FIRESTORE=true` for production data; it only reads.
 - **Not yet built:** the BigQuery log sink (infra, needs Daniel's approval), `error` / `zero_result` / `duration_ms` events, and per-MCP-tool feature use.
+
+## 9. School & Family Logistics MCP (DAN-251)
+
+[`src/dojo/logistics.py`](src/dojo/logistics.py) backs three read-only tools on the existing MCP server: `school_today`, `school_upcoming` and `pickup_owner`.
+
+- **Children and schools: `FAMILY_SCHOOLS`** (JSON list of `{child, school, source}`).
+  - With it unset, the Dojo roster's first names are used.
+  - Only `source: "dojo"` is connected. Others, such as `lehrman`, return `status: "not_connected"`.
+- **Pickup ownership: `FAMILY_PICKUP_CALENDARS`** (JSON `{owner: secret iCal URL}`, one per Family calendar).
+  - Recurring events are expanded with `recurring-ical-events`.
+  - An event counts if its title matches pickup/carpool/dismissal or drop-off.
+  - The owner is the calendar the instance sits on.
+  - Feeds are cached for 10 minutes. These URLs are secrets: store them in Secret Manager, never in the repo.
+- **Privacy:**
+  - The tools return titles, dates, times and configured child labels only. Descriptions, message bodies, sender names and attachments are never returned.
+  - `pickup_owner` refuses on Cloud Run unless `REQUIRE_AUTH=true`.
+- **Catalog:** [`src/dojo/mcp_catalog.json`](src/dojo/mcp_catalog.json) is served at `/.well-known/mcp-catalog.json`, with `last_health_check` taken from the last sync.

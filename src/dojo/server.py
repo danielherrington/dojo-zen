@@ -386,6 +386,13 @@ async def get_status():
     }
 
 
+@app.get("/.well-known/mcp-catalog.json", include_in_schema=False)
+async def mcp_catalog():
+    """Tool-catalog metadata for this MCP server (DAN-251 / DAN-244). Public: describes, never returns data."""
+    from dojo.logistics import catalog_entry
+    return catalog_entry(db)
+
+
 # --- Twilio SMS / WhatsApp / RCS Inbound Webhook ---
 
 def _twilio_candidate_urls(request: Request) -> List[str]:
