@@ -43,8 +43,13 @@ SECRET_ENV = [
 ]
 
 
+# Secrets that already exist under another name (DOJO_ACCESS_TOKEN was rotated straight into
+# Secret Manager on 2026-11-20, DAN-414).
+EXISTING_IDS = {"DOJO_ACCESS_TOKEN": "dojo-access-token"}
+
+
 def secret_id(env_name: str) -> str:
-    return f"{SERVICE}-{env_name.lower().replace('_', '-')}"
+    return EXISTING_IDS.get(env_name) or f"{SERVICE}-{env_name.lower().replace('_', '-')}"
 
 
 def plan(service: Dict, names: List[str] = SECRET_ENV) -> List[str]:

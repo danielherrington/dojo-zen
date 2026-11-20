@@ -33,7 +33,7 @@ def test_swap_is_one_spec_with_refs_and_no_values():
     out = mod.to_secret_refs(_service(), ["DOJO_ACCESS_TOKEN", "GEMINI_API_KEY"])
     env = {e["name"]: e for e in out["spec"]["template"]["spec"]["containers"][0]["env"]}
     assert env["DOJO_ACCESS_TOKEN"] == {"name": "DOJO_ACCESS_TOKEN", "valueFrom": {
-        "secretKeyRef": {"name": "dojo-zen-dojo-access-token", "key": "latest"}}}
+        "secretKeyRef": {"name": "dojo-access-token", "key": "latest"}}}
     assert env["REQUIRE_AUTH"]["value"] == "true"  # non-secret config untouched
     text = json.dumps(out)
     assert "tok-value" not in text and "gem-value" not in text
@@ -45,3 +45,7 @@ def test_original_is_not_mutated():
     svc = _service()
     mod.to_secret_refs(svc, ["DOJO_ACCESS_TOKEN"])
     assert svc["spec"]["template"]["spec"]["containers"][0]["env"][0]["value"] == "tok-value"
+
+
+def test_new_secret_ids_follow_service_prefix():
+    assert mod.secret_id("GEMINI_API_KEY") == "dojo-zen-gemini-api-key"
