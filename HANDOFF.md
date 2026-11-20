@@ -198,6 +198,8 @@ curl -s -X POST https://dojo.herrington.ai/api/sync | python3 -m json.tool
 
 **Where secrets live (rotated 2026-11-16):** `CRON_SECRET` and `DOJO_ACCESS_TOKEN` are env vars on the `dojo-zen` Cloud Run service. Copies are in Daniel's macOS Keychain (service `dojo-zen`, accounts `CRON_SECRET` / `DOJO_ACCESS_TOKEN`; read one with `security find-generic-password -s dojo-zen -a CRON_SECRET -w`). `CRON_SECRET` is also a GitHub Actions secret used by the scheduler-sync step. Never commit them. To rotate `CRON_SECRET`, change all three, then re-run the scheduler sync (`scripts/deploy.sh` or the workflow).
 
+**Secret Manager (DAN-402 / DAN-414):** `DOJO_ACCESS_TOKEN` was rotated on 2026-11-20 and now lives only in Secret Manager secret `dojo-access-token`, mounted as an env var (`--update-secrets DOJO_ACCESS_TOKEN=dojo-access-token:latest`); the Keychain copy above is the old, revoked code. `CRON_SECRET`, `DOJO_PASSWORD`, `SMTP_PASS` and `GEMINI_API_KEY` are still plain env values on the service. `uv run python scripts/move_secrets_to_secret_manager.py` prints the plan (names only); `--apply` copies each value into secret `dojo-zen-<name>`, grants the runtime account access, and swaps all of them to `latest` secret references in one `gcloud run services replace`, so no revision runs without the access token. After that, rotate a secret with `gcloud secrets versions add` and a new revision; never `--env-vars-file`, which replaces every env var.
+
 `DOJO_ACCESS_TOKEN` can hold several comma-separated tokens (for example one per family member or MCP client), so a single token can be revoked.
 
 **Rollout:** (1) set `DOJO_ACCESS_TOKEN`, `TWILIO_AUTH_TOKEN` and `CRON_SECRET` on the `dojo-zen` service; (2) add the bearer header to MCP clients:
