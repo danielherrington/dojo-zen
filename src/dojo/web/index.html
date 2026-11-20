@@ -895,7 +895,7 @@
         agentBubble.innerHTML = html;
         history.appendChild(agentBubble);
       } catch (err) {
-        loadingBubble.innerHTML = `<span style="color: var(--urgent);">Error communicating with server: ${err.message}</span>`;
+        loadingBubble.innerHTML = `<span style="color: var(--urgent);">Error communicating with server: ${escapeHtml(String(err.message))}</span>`;
       }
       history.scrollTop = history.scrollHeight;
     }
@@ -1009,7 +1009,7 @@
 
         container.innerHTML = html;
       } catch (e) {
-        container.innerHTML = `<p style="color: var(--urgent); padding: 20px;">Failed to load briefing: ${e.message}</p>`;
+        container.innerHTML = `<p style="color: var(--urgent); padding: 20px;">Failed to load briefing: ${escapeHtml(String(e.message))}</p>`;
       }
     }
 
@@ -1045,7 +1045,7 @@
         allFeedItems = data.items || [];
         renderFeed(allFeedItems);
       } catch (e) {
-        container.innerHTML = `<p style="color: var(--urgent); padding: 20px;">Failed to load feed: ${e.message}</p>`;
+        container.innerHTML = `<p style="color: var(--urgent); padding: 20px;">Failed to load feed: ${escapeHtml(String(e.message))}</p>`;
       }
     }
 
@@ -1162,8 +1162,8 @@
           } else {
             // Button to trigger OCR scan on demand
             attachmentsHtml += `
-              <div class="ocr-scan-cta" id="ocr-cta-${it.id}">
-                <button class="action-btn-sm" onclick="triggerOcrScan('${it.id}')" id="scan-btn-${it.id}" style="background: #e0f2fe; color: #0284c7; border-color: #bae6fd;">
+              <div class="ocr-scan-cta" id="ocr-cta-${escapeHtml(it.id)}">
+                <button class="action-btn-sm" onclick="triggerOcrScan('${escapeHtml(it.id)}')" id="scan-btn-${escapeHtml(it.id)}" style="background: #e0f2fe; color: #0284c7; border-color: #bae6fd;">
                   🔍 Extract Flyer / Image Text (Gemini OCR)
                 </button>
               </div>`;
@@ -1171,15 +1171,15 @@
         }
 
         html += `
-          <div class="card feed-card" id="item-${it.id}" data-id="${it.id}">
+          <div class="card feed-card" id="item-${escapeHtml(it.id)}" data-id="${escapeHtml(it.id)}">
             <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
               <div>
                 <div class="card-title">${escapeHtml(it.author)}</div>
                 <div class="card-meta">📅 Posted: ${escapeHtml(it.posted_at_str)}</div>
               </div>
               <div style="display: flex; gap: 6px; flex-shrink: 0;">
-                <button class="action-btn-sm" onclick="copyDeepLink('${it.id}')" title="Copy direct link to this post">🔗 Share</button>
-                <a class="action-btn-sm" href="https://home.classdojo.com/#/story/${it.id}" target="_blank" rel="noopener" title="Open original in ClassDojo">↗ Dojo</a>
+                <button class="action-btn-sm" onclick="copyDeepLink('${escapeHtml(it.id)}')" title="Copy direct link to this post">🔗 Share</button>
+                <a class="action-btn-sm" href="https://home.classdojo.com/#/story/${escapeHtml(it.id)}" target="_blank" rel="noopener" title="Open original in ClassDojo">↗ Dojo</a>
               </div>
             </div>
             ${it.text ? `<div class="card-body" style="white-space: pre-wrap;">${escapeHtml(it.text)}</div>` : ''}
@@ -1355,8 +1355,11 @@
       }
     }
 
+    // LLM answers are untrusted: they're generated from ClassDojo posts written by other people
+    // (DAN-404). Escape everything first; the rules below only add fixed tags around escaped text.
     function formatMarkdown(text) {
       if (!text) return '';
+      text = escapeHtml(String(text));
       // Headers
       text = text.replace(/^### (.*?)$/gm, '<h4 style="margin: 8px 0 4px 0; font-size: 15px; color: var(--text);">$1</h4>');
       text = text.replace(/^## (.*?)$/gm, '<h3 style="margin: 10px 0 4px 0; font-size: 16px; color: var(--text);">$1</h3>');

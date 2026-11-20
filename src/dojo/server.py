@@ -84,6 +84,55 @@ def _record_usage(day: str, channel: str) -> None:
 # Per-channel daily usage counters (DAN-200). Outermost, so requests rejected by the token gate aren't counted.
 app.add_middleware(UsageMiddleware, recorder=_record_usage, enabled=lambda: settings.usage_analytics)
 
+# Browser hardening for the portal and login pages (DAN-404). The portal uses one inline <script>
+# and inline onclick handlers, so scripts stay 'self' + 'unsafe-inline'; what the policy adds is no
+# third-party scripts, no fetches/beacons to other hosts (connect-src 'self'), no plugins, no
+# <base> hijack, no framing and forms that only post back here.
+CONTENT_SECURITY_POLICY = "; ".join([
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https:",
+    "media-src 'self' https:",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+])
+SECURITY_HEADERS = [
+    (b"content-security-policy", CONTENT_SECURITY_POLICY.encode()),
+    (b"x-content-type-options", b"nosniff"),
+    (b"referrer-policy", b"same-origin"),
+]
+
+
+class SecurityHeadersMiddleware:
+    """Pure ASGI (keeps MCP streaming intact): adds browser security headers to HTML responses."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                ctype = next((v for k, v in headers if k.lower() == b"content-type"), b"")
+                if ctype.startswith(b"text/html"):
+                    names = {k.lower() for k, _ in headers}
+                    headers += [h for h in SECURITY_HEADERS if h[0] not in names]
+                    message = dict(message, headers=headers)
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
+app.add_middleware(SecurityHeadersMiddleware)
+
 WEB_DIR = Path(__file__).parent / "web"
 
 
