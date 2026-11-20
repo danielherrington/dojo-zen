@@ -40,9 +40,12 @@ jobs:
 
   deploy:
     name: Deploy to Cloud Run & Cloud Scheduler
-    needs: test
+    needs: test  # tests must pass first
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    # Protected environment (DAN-406): deployment branches limited to main, Daniel as required
+    # reviewer. Its name is part of the OIDC subject the GCP provider trusts.
+    environment: production
     permissions:
       contents: read
       id-token: write
@@ -51,17 +54,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Check for GCP credentials secret
+      # Keyless: GitHub OIDC -> Workload Identity Federation. No service-account JSON key.
+      - name: Check for Workload Identity config
         id: check_creds
         env:
-          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY_JSON || secrets.FIREBASE_SERVICE_ACCOUNT_HERRINGTON_AI_SITE }}
+          WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+          DEPLOY_SA: ${{ vars.GCP_DEPLOY_SA }}
         run: |
-          if [ -z "$GCP_SA_KEY" ]; then
+          if [ -z "$WIF_PROVIDER" ] || [ -z "$DEPLOY_SA" ]; then
             echo "has_creds=false" >> "$GITHUB_OUTPUT"
-            {
-              echo "### ⚠️ Skipping Cloud Run Deploy: Missing \`GCP_SA_KEY_JSON\` Secret"
-              echo "To enable zero-touch deployments on every push to \`main\`, add \`GCP_SA_KEY_JSON\` to [GitHub Actions Secrets](https://github.com/danielherrington/dojo-zen/settings/secrets/actions)."
-            } >> "$GITHUB_STEP_SUMMARY"
+            echo "### Skipping deploy: GCP_WIF_PROVIDER / GCP_DEPLOY_SA environment variables are not set (see DAN-406)." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "has_creds=true" >> "$GITHUB_OUTPUT"
           fi
@@ -70,7 +72,8 @@ jobs:
         if: steps.check_creds.outputs.has_creds == 'true'
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY_JSON || secrets.FIREBASE_SERVICE_ACCOUNT_HERRINGTON_AI_SITE }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
 
       - name: Set up Cloud SDK
         if: steps.check_creds.outputs.has_creds == 'true'
