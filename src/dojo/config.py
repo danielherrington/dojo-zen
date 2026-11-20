@@ -12,6 +12,10 @@ if _env_file.exists():
     load_dotenv(dotenv_path=_env_file)
 
 
+def _analytics_on() -> bool:
+    return os.getenv("ANALYTICS", "on").lower() not in ("off", "false", "0", "no")
+
+
 def _positive_int(name: str, default: int) -> int:
     """Read a positive integer env var, falling back to the default if it's unset or invalid."""
     try:
@@ -85,13 +89,23 @@ class Settings(BaseModel):
         default_factory=lambda: os.getenv("REQUIRE_AUTH", "").lower() in ("true", "1", "yes")
     )
 
-    # Analytics (DAN-200): email open/click tracking and per-channel daily usage counters.
+    # Analytics (DAN-200/DAN-233). ANALYTICS=off is the master kill switch for every tracker, counter
+    # and herrington.usage.v1 event; EMAIL_TRACKING / USAGE_ANALYTICS switch off one part each.
+    analytics_enabled: bool = Field(
+        default_factory=lambda: os.getenv("ANALYTICS", "on").lower() not in ("off", "false", "0", "no")
+    )
     email_tracking: bool = Field(
-        default_factory=lambda: os.getenv("EMAIL_TRACKING", "true").lower() in ("true", "1", "yes")
+        default_factory=lambda: _analytics_on() and os.getenv("EMAIL_TRACKING", "true").lower() in ("true", "1", "yes")
     )
     usage_analytics: bool = Field(
-        default_factory=lambda: os.getenv("USAGE_ANALYTICS", "true").lower() in ("true", "1", "yes")
+        default_factory=lambda: _analytics_on() and os.getenv("USAGE_ANALYTICS", "true").lower() in ("true", "1", "yes")
     )
+    # v1 events: prod | test | dev, so tests and local runs never mix into production numbers.
+    analytics_env: str = Field(
+        default_factory=lambda: os.getenv("ANALYTICS_ENV") or ("prod" if os.getenv("K_SERVICE") else "dev")
+    )
+    # Salt for actor hashes (store in Secret Manager). Without it, events carry no actor at all.
+    analytics_salt: str = Field(default_factory=lambda: os.getenv("ANALYTICS_SALT", ""))
 
     # Retention (DAN-205). Per-event tracking rows (email sends, opens, clicks) are deleted after
     # ANALYTICS_RETENTION_DAYS; the aggregate daily usage counters after USAGE_RETENTION_DAYS.

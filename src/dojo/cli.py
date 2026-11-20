@@ -386,6 +386,15 @@ def cmd_analyze_images(args: argparse.Namespace) -> None:
     console.print(f"\n[bold green]✓ Completed image analysis for {len(to_process)} posts.[/bold green]")
 
 
+def cmd_analytics_report(args: argparse.Namespace) -> None:
+    """Analyst report from stored aggregates (DAN-233). Reads only; prints no personal data."""
+    import json as _json
+    from dojo.analytics import build_report, format_report
+
+    report = build_report(get_db(), days=args.days)
+    print(_json.dumps(report, indent=2, default=str) if args.json else format_report(report))
+
+
 def cmd_mcp(args: argparse.Namespace) -> None:
     """Run the Model Context Protocol (MCP) server for ClassDojo."""
     from dojo.mcp_server import run_mcp
@@ -463,6 +472,14 @@ def main() -> None:
     p_analyze.add_argument("--limit", type=int, default=10, help="Maximum items to analyze (default: 10)")
     p_analyze.add_argument("--all", action="store_true", help="Re-analyze items that already have OCR data")
     p_analyze.set_defaults(func=cmd_analyze_images)
+
+    # analytics report
+    p_analytics = subparsers.add_parser("analytics", help="Product analytics (herrington.usage.v1)")
+    analytics_sub = p_analytics.add_subparsers(dest="analytics_command", required=True)
+    p_report = analytics_sub.add_parser("report", help="Print funnels, feature use and triage stats")
+    p_report.add_argument("--days", type=int, default=7, help="Window in days (default: 7)")
+    p_report.add_argument("--json", action="store_true", help="Print the raw report as JSON")
+    p_report.set_defaults(func=cmd_analytics_report)
 
     args = parser.parse_args()
     if not args.command:

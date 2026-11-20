@@ -40,14 +40,14 @@ class Mailer:
             app_base_url=self.settings.app_base_url.rstrip("/")
         )
 
-    def _tracked(self, html_content: str) -> tuple[str, Optional[str]]:
+    def _tracked(self, html_content: str, kind: Optional[str] = None) -> tuple[str, Optional[str]]:
         """Add open/click tracking when enabled; returns (html, email_id)."""
         if not self.settings.email_tracking or self.db is None:
             return html_content, None
         from dojo.analytics import instrument_html, new_email_id
         email_id = new_email_id()
         try:
-            return instrument_html(html_content, email_id, self.settings.app_base_url), email_id
+            return instrument_html(html_content, email_id, self.settings.app_base_url, kind=kind), email_id
         except Exception:
             return html_content, None
 
@@ -87,7 +87,7 @@ class Mailer:
                 "and SMTP_PASS in your .env file."
             )
 
-        html_content, email_id = self._tracked(self.render_html(briefing))
+        html_content, email_id = self._tracked(self.render_html(briefing), kind="digest")
 
         # Build multipart message
         msg = MIMEMultipart("alternative")
@@ -140,7 +140,7 @@ class Mailer:
                 "and SMTP_PASS in your .env file."
             )
 
-        html_content, email_id = self._tracked(self.render_alert_html(decision))
+        html_content, email_id = self._tracked(self.render_alert_html(decision), kind="alert")
         plain_text = (
             f"🚨 URGENT DOJOZEN ALERT\n"
             f"=========================================\n"

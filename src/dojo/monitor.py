@@ -152,6 +152,9 @@ class MessageMonitor:
         """Process an alert decision: dispatch if urgent, record status in the alert log."""
         if not retry and self.db.is_already_alerted(decision.item_id):
             return
+        if not retry:
+            from dojo.usage_v1 import record_triage
+            record_triage(self.db, decision)  # DAN-233: category + false-alarm guard counters, no text
 
         if decision.urgency == UrgencyLevel.IMMEDIATE:
             console.print(f"[bold red]🚨 URGENT ALERT DETECTED:[/bold red] {decision.title}")

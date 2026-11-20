@@ -256,3 +256,28 @@ for c in dojo_email_sends dojo_email_events dojo_usage; do
 done
 gcloud firestore fields ttls list --project=herrington-ai-site
 ```
+
+### herrington.usage.v1 events, funnels and triage stats (DAN-233)
+
+[`src/dojo/usage_v1.py`](src/dojo/usage_v1.py) maps DojoZen onto the Herrington analytics standard (`linear-conductor/docs/analytics-standard.md`).
+
+- **Events.**
+  - One JSON line per event on stdout, which Cloud Logging stores as `jsonPayload.schema="herrington.usage.v1"`, with `app=dojo-zen`.
+  - `env` is `prod` on Cloud Run, `dev` locally and `test` under pytest; `ANALYTICS_ENV` overrides it.
+  - Events emitted:
+    - `feature_used`, per counted request: channel `web` / `mcp:<claude|cursor|…>` / `sms`, feature = DAN-200 channel.
+    - `funnel_step` for the `alert` and `digest` funnels.
+    - `triage`, channel `cron`.
+- **Actor.** HMAC-SHA256(`ANALYTICS_SALT`, access token), first 16 hex. It's omitted when no salt is set. Email events never have an actor.
+- **Funnels.**
+  - `alert`: sent → opened → action_taken (clicked through to the flagged item).
+  - `digest`: sent → opened → link_clicked.
+  - A click implies an open.
+  - The email kind travels in the tracking URLs (`k=alert|digest`), so open/click events need no database read.
+  - `/api/analytics` and the report compute the funnels from the 90-day `email_sends` / `email_events` rows.
+- **Triage.**
+  - `AlertDecision.category`: health, logistics, teacher_request, school_closure, health_notice, routine, bloat.
+  - `AlertDecision.guards`: negation, policy_reminder, paperwork.
+  - `MessageMonitor` counts each item's first evaluation as `triage__<category>` and `guard__<guard>` on `dojo_usage/{day}`, plus `guard__prevented_alert` when guards stopped every match.
+- **Report.** `uv run dojo analytics report --days 7`. Add `USE_FIRESTORE=true` for production data; it only reads.
+- **Not yet built:** the BigQuery log sink (infra, needs Daniel's approval), `error` / `zero_result` / `duration_ms` events, and per-MCP-tool feature use.
