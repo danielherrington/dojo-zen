@@ -190,7 +190,7 @@ curl -s -X POST https://dojo.herrington.ai/api/sync | python3 -m json.tool
 | :--- | :--- |
 | `/` (portal) | `__session` cookie set by `/login` (Firebase Hosting forwards only the cookie named `__session`); otherwise redirects to `/login` |
 | `/api/*` data endpoints | `Authorization: Bearer $DOJO_ACCESS_TOKEN` or the `__session` cookie |
-| `/mcp` | Bearer header, the cookie, or `?access_token=` (only for MCP clients that can't send headers) |
+| `/mcp` | Bearer header or the cookie. Never `?access_token=`: URLs are stored in request logs (DAN-414) |
 | `/api/status` | Public (counts only) |
 | `/api/sms/webhook` | Valid `X-Twilio-Signature` (HMAC-SHA1 with `TWILIO_AUTH_TOKEN`); unsigned requests are logged and still allowed while `REQUIRE_AUTH` is off |
 | `/t/o/*`, `/t/c/*` | Public email open pixel and click redirect (DAN-200): they take only random 32-hex email ids, store no IPs or user-agents, return no data, and redirect only to same-site paths |
