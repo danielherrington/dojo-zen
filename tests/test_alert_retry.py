@@ -185,3 +185,19 @@ def test_firestore_failed_alert_parity():
         fdb.record_alert(item_id="m_capped", sent_status="failed: x", **common)
     assert fdb.get_alert("m_capped")["attempts"] == 5
     assert all(m["id"] != "m_capped" for m in fdb.get_failed_alerts(max_attempts=5)["messages"])
+
+
+def test_cloud_run_logs_carry_no_message_text_or_recipient(db, monkeypatch, capsys, caplog):
+    """Security review 2026-11-20: Cloud Run stdout is Cloud Logging; keep kids' details out of it."""
+    import logging
+
+    monkeypatch.setenv("K_SERVICE", "dojo-zen")
+    db.upsert_messages([FEVER_MSG])
+    mailer = FlakyMailer(fail=False)
+    with caplog.at_level(logging.INFO):
+        _monitor(db, mailer).check_once(send_email=True, now=NOW)
+    out = capsys.readouterr().out + caplog.text
+    assert mailer.sent == ["m_fever"]
+    assert "m_fever" in out
+    for private in ("Isabella", "with a fever", "nurse", "family@example.test"):
+        assert private.lower() not in out.lower()

@@ -429,11 +429,11 @@ async def twilio_sms_webhook(
     )
     if not signed:
         if settings.require_auth:
-            logger.warning("Rejected SMS webhook with missing/invalid Twilio signature (From=%s).", From)
+            logger.warning("Rejected SMS webhook with missing/invalid Twilio signature.")
             raise HTTPException(status_code=403, detail="Invalid Twilio signature.")
         logger.warning("SMS webhook has no valid Twilio signature; allowed because REQUIRE_AUTH is off.")
 
-    logger.info(f"Incoming text from {From} (To: {To}): {Body[:60]}")
+    logger.info("Incoming text received (%d chars).", len(Body))  # no phone numbers or message text
     twiml = handle_incoming_sms(
         from_number=From,
         query_text=Body,

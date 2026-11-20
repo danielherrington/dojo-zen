@@ -157,16 +157,21 @@ class MessageMonitor:
             record_triage(self.db, decision)  # DAN-233: category + false-alarm guard counters, no text
 
         if decision.urgency == UrgencyLevel.IMMEDIATE:
-            console.print(f"[bold red]🚨 URGENT ALERT DETECTED:[/bold red] {decision.title}")
-            console.print(f"   [yellow]Reason:[/yellow] {decision.reason}")
-            console.print(f"   [dim]Message: {decision.body[:120]}...[/dim]")
+            # Cloud Run stdout is Cloud Logging: log ids and category only, never the message text.
+            from dojo.auth import is_cloud_run
+            if is_cloud_run():
+                logger.info("Urgent alert detected: item=%s category=%s", decision.item_id, decision.category)
+            else:
+                console.print(f"[bold red]🚨 URGENT ALERT DETECTED:[/bold red] {decision.title}")
+                console.print(f"   [yellow]Reason:[/yellow] {decision.reason}")
+                console.print(f"   [dim]Message: {decision.body[:120]}...[/dim]")
 
             status = "dry_run"
             if send_email and recipient:
                 try:
                     self.mailer.send_urgent_alert(decision, to_email=recipient)
                     status = "sent"
-                    console.print(f"[bold green]✓ Sent immediate priority alert to {recipient}![/bold green]")
+                    console.print("[bold green]✓ Sent immediate priority alert.[/bold green]")
                 except Exception as e:
                     status = f"failed: {e}"
                     logger.error("Failed to dispatch urgent alert %s: %s", decision.item_id, e)
