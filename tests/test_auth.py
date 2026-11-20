@@ -104,15 +104,16 @@ def test_mcp_requires_token(client, locked):
     assert client.post("/mcp/", json=MCP_INIT, headers=MCP_HEADERS).status_code == 401
 
 
-def test_mcp_accepts_bearer_and_query_token(guarded, locked):
+def test_mcp_accepts_bearer_token(guarded, locked):
     assert guarded.post("/mcp", json=MCP_INIT).status_code == 401
     res = guarded.post("/mcp", json=MCP_INIT, headers={"Authorization": f"Bearer {TOKEN}"})
     assert res.status_code == 200 and res.text == "inner-app"
-    assert guarded.post(f"/mcp/?access_token={TOKEN}", json=MCP_INIT).status_code == 200
-    assert guarded.post("/mcp?access_token=wrong", json=MCP_INIT).status_code == 401
 
 
-def test_query_token_only_allowed_for_mcp(client, locked):
+def test_token_in_url_is_never_accepted(guarded, client, locked):
+    """DAN-414: query strings are logged by Cloud Run, so the token must travel in a header."""
+    assert guarded.post(f"/mcp/?access_token={TOKEN}", json=MCP_INIT).status_code == 401
+    assert guarded.post(f"/mcp?access_token={TOKEN}", json=MCP_INIT).status_code == 401
     assert client.get(f"/api/feed?access_token={TOKEN}").status_code == 401
 
 

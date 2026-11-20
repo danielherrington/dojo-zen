@@ -4,8 +4,8 @@ Rollout model: everything here is inert until ``REQUIRE_AUTH=true`` is set, so m
 auto-deploying never locks out existing MCP clients. Once enabled:
 
 * ``/mcp`` and the ``/api/*`` data endpoints need a ``DOJO_ACCESS_TOKEN``, sent as
-  ``Authorization: Bearer <token>``, as the portal's ``__session`` cookie (set by ``/login``),
-  or, for ``/mcp`` only, as ``?access_token=<token>`` for MCP clients that cannot send headers.
+  ``Authorization: Bearer <token>`` or as the portal's ``__session`` cookie (set by ``/login``).
+  Never in the URL: query strings land in request logs (DAN-414).
 * ``/`` redirects to ``/login`` without a valid session.
 * The Twilio webhook must carry a valid ``X-Twilio-Signature``.
 
@@ -19,7 +19,7 @@ import hmac
 import logging
 import os
 from typing import Iterable, List, Mapping, Optional
-from urllib.parse import parse_qs, quote
+from urllib.parse import quote
 
 from starlette.responses import JSONResponse, RedirectResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -108,10 +108,8 @@ class AccessGuardMiddleware:
             return
 
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+        # Header or cookie only: a token in the URL would be stored in Cloud Run request logs (DAN-414).
         candidate = _bearer(headers.get("authorization")) or _cookie(headers.get("cookie"), SESSION_COOKIE)
-        if not candidate and (path == "/mcp" or path.startswith("/mcp/")):
-            query = parse_qs(scope.get("query_string", b"").decode("latin-1"))
-            candidate = (query.get("access_token") or [None])[0]
 
         if token_is_valid(candidate, self.settings):
             await self.app(scope, receive, send)

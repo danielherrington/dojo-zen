@@ -5,7 +5,7 @@
   "repo": "https://github.com/danielherrington/dojo-zen",
   "endpoint": "https://dojo.herrington.ai/mcp",
   "transports": ["streamable-http", "stdio"],
-  "auth_model": "Bearer DOJO_ACCESS_TOKEN (header, __session cookie, or ?access_token= for /mcp). Enforced only when REQUIRE_AUTH=true; pickup_owner refuses on Cloud Run until it is.",
+  "auth_model": "Bearer DOJO_ACCESS_TOKEN (Authorization header or __session cookie; never in the URL). Enforced when REQUIRE_AUTH=true (on in production); pickup_owner refuses on Cloud Run otherwise.",
   "access": "read-only",
   "approval_requirements": "none (no write tools)",
   "owner_agent": "claude (DojoZen Claude Code session)",
