@@ -340,8 +340,9 @@ def school_upcoming(days: int = 14, start: Optional[str] = None) -> Dict[str, An
 
 @mcp.tool()
 def pickup_owner(date: Optional[str] = None, kind: str = "any") -> Dict[str, Any]:
-    """Who has school pickup or drop-off on a date. The owner is the Family calendar the event
-    instance sits on (recurring events are expanded).
+    """Who has school pickup or drop-off on a date: the Family Schedule Helper's weekly plan
+    (default caregiver, rerouted by travel cover), or the Family calendar each event sits on when
+    calendar feeds are configured. One-day swaps on Google Calendar aren't visible from the plan.
 
     Args:
         date: "today" (default), "tomorrow", or YYYY-MM-DD.

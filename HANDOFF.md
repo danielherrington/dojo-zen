@@ -288,10 +288,15 @@ gcloud firestore fields ttls list --project=herrington-ai-site
 
 [`src/dojo/logistics.py`](src/dojo/logistics.py) backs three read-only tools on the existing MCP server: `school_today`, `school_upcoming` and `pickup_owner`.
 
+- **Family Schedule Helper (DAN-396):** the default source for pickups.
+  - Dojo Zen reads the helper's Firestore doc `family/setup` in project `family-schedule-helper`. It's read-only: the runtime account has `roles/datastore.viewer` there and nothing else. The read is cached for 10 minutes.
+  - On by default when `USE_FIRESTORE=true`. `FAMILY_SETUP_PROJECT` overrides the project; `off` disables it.
+  - Schools are not taken from it: its children list includes the dog without `isPet`, and its schools disagree with the ClassDojo roster, so `FAMILY_SCHOOLS` stays the source for schools.
+  - `pickup_owner` answers from the weekly plan: each pickup/drop-off's default caregiver, rerouted by travel cover (`covering_for`). Locations and notes are never returned. One-day swaps made on Google Calendar aren't visible yet, and the response says so.
 - **Children and schools: `FAMILY_SCHOOLS`** (JSON list of `{child, school, source}`).
   - With it unset, the Dojo roster's first names are used.
   - Only `source: "dojo"` is connected. Others, such as `lehrman`, return `status: "not_connected"`.
-- **Pickup ownership: `FAMILY_PICKUP_CALENDARS`** (JSON `{owner: secret iCal URL}`, one per Family calendar).
+- **Pickup ownership override: `FAMILY_PICKUP_CALENDARS`** (JSON `{owner: secret iCal URL}`, one per Family calendar). When set, it wins over the helper's weekly plan.
   - Recurring events are expanded with `recurring-ical-events`.
   - An event counts if its title matches pickup/carpool/dismissal or drop-off.
   - The owner is the calendar the instance sits on.

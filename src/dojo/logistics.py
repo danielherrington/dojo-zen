@@ -4,14 +4,21 @@ Three questions, each answered with the minimum a conversation needs:
 
 * ``school_today``: per child, today's school events and action items due today/tomorrow.
 * ``school_upcoming``: dated items in the next N days, typed day_off / early_dismissal / deadline / event.
-* ``pickup_owner``: who has pickup/drop-off on a date. The owner is the Family calendar the event
-  instance sits on (read from each calendar's private iCal feed, recurring events expanded).
+* ``pickup_owner``: who has pickup/drop-off on a date. Two sources, first match wins:
+  1. FAMILY_PICKUP_CALENDARS (private iCal feeds): the owner is the calendar the instance sits on.
+  2. The Family Schedule Helper's ``family/setup`` Firestore doc (DAN-396): the weekly plan's default
+     caregiver for each pickup/drop-off, rerouted by travel cover. One-day swaps made in the helper
+     live only on Google Calendar and are not visible from this source.
 
 Privacy: this repo is public, so children, schools and calendar feeds come from env, never code.
 No message bodies, descriptions, photos, attachments or sender names are returned. ``pickup_owner``
 refuses on Cloud Run unless REQUIRE_AUTH is on: pickup times are safety-sensitive.
 
-Config (JSON env vars):
+Config: children and schools come from FAMILY_SCHOOLS, else the ClassDojo roster. The helper doc
+is read from project FAMILY_SETUP_PROJECT (default ``family-schedule-helper`` when USE_FIRESTORE is
+on; the runtime account has read-only roles/datastore.viewer there).
+
+JSON env vars (optional overrides):
     FAMILY_SCHOOLS='[{"child": "Izzy", "school": "North Beach Elementary", "source": "dojo"},
                      {"child": "Vale", "school": "Lehrman", "source": "lehrman"}]'
     FAMILY_PICKUP_CALENDARS='{"Daniel": "https://calendar.google.com/calendar/ical/.../basic.ics", ...}'
@@ -53,8 +60,54 @@ def _json_env(name: str, default: Any) -> Any:
         return default
 
 
+# --- Family Schedule Helper (family/setup in its own Firestore project, read-only) ---
+
+SETUP_TTL_SECONDS = 600
+_SETUP_CACHE: Dict[str, Any] = {}
+
+
+def setup_project() -> Optional[str]:
+    explicit = os.getenv("FAMILY_SETUP_PROJECT", "").strip()
+    if explicit:
+        return None if explicit.lower() in {"off", "none", "false"} else explicit
+    return "family-schedule-helper" if os.getenv("USE_FIRESTORE", "").lower() == "true" else None
+
+
+def _read_setup_doc(project: str) -> Optional[Dict[str, Any]]:
+    from google.cloud import firestore
+
+    snap = firestore.Client(project=project).collection("family").document("setup").get()
+    return snap.to_dict() if snap.exists else None
+
+
+def family_setup(loader: Callable[[str], Optional[Dict[str, Any]]] = _read_setup_doc) -> Optional[Dict[str, Any]]:
+    """The helper's family/setup doc (cached), or None when not configured or unreadable."""
+    project = setup_project()
+    if not project:
+        return None
+    hit = _SETUP_CACHE.get(project)
+    if hit and time.monotonic() - hit[0] < SETUP_TTL_SECONDS:
+        return hit[1]
+    try:
+        doc = loader(project)
+    except Exception as e:
+        logger.warning(f"Could not read the Family Schedule Helper setup: {type(e).__name__}")
+        return None
+    _SETUP_CACHE[project] = (time.monotonic(), doc)
+    return doc
+
+
+def _first(name: Any, default: str) -> str:
+    parts = str(name or "").split()
+    return parts[0] if parts else default
+
+
 def family_schools(db: Any) -> List[Dict[str, str]]:
-    """Configured children, or the Dojo roster (first names) when FAMILY_SCHOOLS is unset."""
+    """Configured children, or the Dojo roster (first names) when FAMILY_SCHOOLS is unset.
+
+    Not taken from the helper: its children list mixes in pets and its schools don't yet agree with
+    the ClassDojo roster (DAN-396), so schools stay explicit config.
+    """
     configured = _json_env("FAMILY_SCHOOLS", None)
     if isinstance(configured, list) and configured:
         return [
@@ -62,11 +115,8 @@ def family_schools(db: Any) -> List[Dict[str, str]]:
             for c in configured if isinstance(c, dict)
         ]
     roster = db.get_all_children() if hasattr(db, "get_all_children") else []
-    out = []
-    for c in roster:
-        name = (c.get("name") or c.get("first_name") or "Child").split()[0]
-        out.append({"child": name, "school": "", "source": "dojo"})
-    return out
+    return [{"child": _first(c.get("name") or c.get("first_name"), "Child"), "school": "", "source": "dojo"}
+            for c in roster]
 
 
 def pickup_calendars() -> Dict[str, str]:
@@ -214,6 +264,7 @@ def pickup_owner(
     calendars: Optional[Dict[str, str]] = None,
     fetch: Callable[[str], str] = _fetch_ics,
     children: Optional[List[str]] = None,
+    setup: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     import icalendar
     import recurring_ical_events
@@ -224,8 +275,11 @@ def pickup_owner(
         return {"date": target.isoformat(), "status": "disabled", "reason": reason, "assignments": []}
     calendars = pickup_calendars() if calendars is None else calendars
     if not calendars:
+        setup = family_setup() if setup is None else setup
+        if setup and setup.get("blueprints"):
+            return pickup_from_weekly_plan(setup, target, kind)
         return {"date": target.isoformat(), "status": "not_connected", "assignments": [],
-                "reason": "No Family calendars configured (FAMILY_PICKUP_CALENDARS)."}
+                "reason": "No Family calendars (FAMILY_PICKUP_CALENDARS) or Family Schedule Helper plan available."}
 
     labels = children or []
     assignments, errors = [], []
@@ -255,6 +309,51 @@ def pickup_owner(
         result["note"] = "No pickup or drop-off events on any Family calendar for this date."
     if errors:
         result["calendars_unreachable"] = errors
+    return result
+
+
+WEEKLY_PLAN_NOTE = ("From the Family Schedule Helper's weekly plan and travel cover. One-day swaps, "
+                    "cancellations and school holidays aren't visible here yet.")
+
+
+def pickup_from_weekly_plan(setup: Dict[str, Any], target: date_cls, kind: str = "any") -> Dict[str, Any]:
+    """Who has each pickup/drop-off on ``target`` per the helper's weekly plan (no locations or notes)."""
+    caregivers = {c.get("id"): c for c in setup.get("caregivers") or [] if isinstance(c, dict)}
+    kids = {c.get("id"): c for c in setup.get("children") or [] if isinstance(c, dict)}
+    day_iso = target.isoformat()
+    cover = {}
+    for t in setup.get("travels") or []:
+        if isinstance(t, dict) and str(t.get("startDate", "")) <= day_iso <= str(t.get("endDate", "")):
+            cover[t.get("caregiverId")] = t.get("routeToCaregiverId")
+
+    def name(cid: Any) -> str:
+        return _first((caregivers.get(cid) or {}).get("name"), "Unassigned")
+
+    assignments = []
+    for bp in setup.get("blueprints") or []:
+        if not isinstance(bp, dict):
+            continue
+        ev_kind = bp.get("category")
+        if ev_kind not in ("pickup", "dropoff") or (kind != "any" and ev_kind != kind):
+            continue
+        if target.isoweekday() not in (bp.get("daysOfWeek") or []):
+            continue
+        kid = kids.get(bp.get("childId")) or {}
+        if kid.get("isPet"):
+            continue
+        default = bp.get("defaultCaregiverId")
+        owner = cover.get(default) or default
+        entry = {"owner": name(owner), "kind": ev_kind, "start": bp.get("startTime") or None,
+                 "end": bp.get("endTime") or None, "children": [_first(kid.get("name"), "Child")]}
+        if owner != default:
+            entry["covering_for"] = name(default)
+        assignments.append(entry)
+
+    assignments.sort(key=lambda a: (a["start"] or "", a["owner"]))
+    result = {"date": day_iso, "status": "ok", "source": "weekly_plan", "assignments": assignments,
+              "note": WEEKLY_PLAN_NOTE}
+    if not assignments:
+        result["note"] = "No pickup or drop-off in the weekly plan for this date. " + WEEKLY_PLAN_NOTE
     return result
 
 
