@@ -162,6 +162,20 @@ class DojoDatabase:
                     PRIMARY KEY (day, channel)
                 )
             """)
+            # Dated items from school emails (DAN-395): titles and dates only, never bodies.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS school_items (
+                    id TEXT PRIMARY KEY,
+                    source TEXT NOT NULL,
+                    message_id TEXT NOT NULL,
+                    date TEXT,
+                    title TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    received_at TEXT,
+                    fetched_at TEXT NOT NULL
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_school_items_date ON school_items(source, date)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_email_sends_sent_at ON email_sends(sent_at)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_email_events_email ON email_events(email_id)")
 
@@ -688,6 +702,42 @@ class DojoDatabase:
                 "SELECT * FROM events ORDER BY start_time ASC"
             ).fetchall()
             return [dict(r) for r in rows]
+
+    # --- School email items (DAN-395) ---
+
+    def upsert_school_items(self, items: List[Dict[str, Any]]) -> int:
+        now = utc_now_iso()
+        with self.get_connection() as conn:
+            for it in items:
+                conn.execute("""
+                    INSERT OR REPLACE INTO school_items
+                        (id, source, message_id, date, title, type, received_at, fetched_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (it["id"], it["source"], it["message_id"], it.get("date"), it.get("title", ""),
+                      it["type"], it.get("received_at"), now))
+            conn.commit()
+        return len(items)
+
+    def get_school_message_ids(self, source: str) -> List[str]:
+        with self.get_connection() as conn:
+            rows = conn.execute("SELECT DISTINCT message_id FROM school_items WHERE source = ?", (source,)).fetchall()
+            return [r[0] for r in rows]
+
+    def get_school_items(self, source: Optional[str] = None, start: Optional[str] = None,
+                         end: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Dated items (markers excluded), optionally by source and inclusive ISO date range."""
+        sql, args = "SELECT * FROM school_items WHERE type != 'seen' AND date IS NOT NULL", []
+        if source:
+            sql += " AND source = ?"
+            args.append(source)
+        if start:
+            sql += " AND date >= ?"
+            args.append(start)
+        if end:
+            sql += " AND date <= ?"
+            args.append(end)
+        with self.get_connection() as conn:
+            return [dict(r) for r in conn.execute(sql + " ORDER BY date, id", args).fetchall()]
 
     def get_all_children(self) -> List[Dict[str, Any]]:
         with self.get_connection() as conn:

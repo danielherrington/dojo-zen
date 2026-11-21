@@ -494,6 +494,24 @@ async def twilio_sms_webhook(
 
 # --- Scheduled Cloud Cron Webhooks ---
 
+@app.post("/api/cron/sync-school-email")
+async def cron_sync_school_email(
+    authorization: Optional[str] = Header(None),
+    secret: Optional[str] = Query(None),
+):
+    """Cloud Scheduler: read-only sync of Lehrman's emails into dated school items (DAN-395)."""
+    _verify_cron_secret(authorization, secret)
+    from dojo import school_email
+
+    if not school_email.gmail_configured():
+        return {"status": "not_configured"}
+    try:
+        return {"status": "ok", **school_email.sync(db)}
+    except Exception as e:
+        logger.error(f"School email sync failed: {type(e).__name__}")
+        raise HTTPException(status_code=500, detail="School email sync failed.")
+
+
 @app.post("/api/cron/check-alerts")
 async def cron_check_alerts(
     authorization: Optional[str] = Header(None),
