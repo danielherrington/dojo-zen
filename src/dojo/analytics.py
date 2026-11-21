@@ -27,7 +27,18 @@ from urllib.parse import quote, urlsplit
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from dojo.tz import family_now, family_tz, to_family_tz
-from dojo.usage_v1 import GUARD_PREFIX, PREVENTED_ALERT, TRIAGE_PREFIX
+from dojo.usage_v1 import (
+    DUR_PREFIX,
+    DURATION_BUCKETS,
+    ERROR_PREFIX,
+    GUARD_PREFIX,
+    PREVENTED_ALERT,
+    TOOL_PREFIX,
+    TRIAGE_PREFIX,
+    ZERO_PREFIX,
+    ZERO_QUERY_MIN_COUNT,
+    ZQ_PREFIX,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -340,6 +351,12 @@ def summarize(
     totals: Counter = Counter()
     triage_categories: Counter = Counter()
     guard_counts: Counter = Counter()
+    calls: Counter = Counter()
+    errors: Counter = Counter()
+    zeros: Counter = Counter()
+    zero_tokens: Counter = Counter()
+    durations: Dict[str, Counter] = defaultdict(Counter)
+    prefixed = ((TOOL_PREFIX, calls), (ERROR_PREFIX, errors), (ZERO_PREFIX, zeros), (ZQ_PREFIX, zero_tokens))
     for row in usage:
         day = row.get("day")
         if not day or day < since_day:
@@ -352,6 +369,14 @@ def summarize(
                 continue
             if channel.startswith(GUARD_PREFIX):
                 guard_counts[channel[len(GUARD_PREFIX):]] += int(count)
+                continue
+            if channel.startswith(DUR_PREFIX):
+                feature, _, bucket = channel[len(DUR_PREFIX):].rpartition("__")
+                durations[feature][bucket] += int(count)
+                continue
+            hit = next((c for p, c in prefixed if channel.startswith(p)), None)
+            if hit is not None:
+                hit[channel.split("__", 1)[1]] += int(count)
                 continue
             daily[day][channel] = daily[day].get(channel, 0) + int(count)
             totals[channel] += int(count)
@@ -377,6 +402,13 @@ def summarize(
             "false_alarm_guards": {k: v for k, v in guard_counts.most_common() if k != PREVENTED_ALERT},
             "alerts_prevented_by_guards": guard_counts.get(PREVENTED_ALERT, 0),
         },
+        "features": {
+            "calls": dict(calls.most_common()),
+            "errors": {k.replace("__", ": ", 1): v for k, v in errors.most_common()},
+            "zero_results": {f: {"count": n, "rate": _rate(n, calls.get(f, 0))} for f, n in zeros.most_common()},
+            "zero_result_terms": {t: n for t, n in zero_tokens.most_common() if n >= ZERO_QUERY_MIN_COUNT},
+            "duration_ms": {f: _percentiles(b) for f, b in sorted(durations.items())},
+        },
         "usage": {
             "totals": dict(totals),
             "daily": [{"day": d, **daily[d]} for d in sorted(daily)],
@@ -388,6 +420,21 @@ def summarize(
         },
         "caveats": CAVEATS,
     }
+
+
+def _percentiles(buckets: Counter) -> Dict[str, Any]:
+    """Approximate p50/p95 (bucket upper bounds, in ms) from duration bucket counts."""
+    order = [str(b) for b in DURATION_BUCKETS] + ["inf"]
+    total = sum(buckets.values())
+    out: Dict[str, Any] = {"calls": total}
+    for name, q in (("p50", 0.5), ("p95", 0.95)):
+        seen = 0
+        for b in order:
+            seen += buckets.get(b, 0)
+            if total and seen >= q * total:
+                out[name] = f"<={b}" if b != "inf" else f">{DURATION_BUCKETS[-1]}"
+                break
+    return out
 
 
 def _funnels(sends_by_id: Dict[str, Dict[str, Any]], opened: set, item_clicked: set, clicked: set) -> Dict[str, Any]:
@@ -424,8 +471,8 @@ def _busiest_weekday(daily: Dict[str, Dict[str, int]]) -> Optional[str]:
 REPORT_GAPS = [
     "Active users / D1-D7-D30 retention: actors exist only in herrington.usage.v1 log events "
     "(BigQuery sink not set up yet), not in Firestore aggregates.",
-    "error / zero_result events and p50/p95 durations are not tracked yet.",
-    "Per-MCP-tool feature use is not tracked yet (only the mcp channel as a whole).",
+    "Durations are bucketed (50 ms ... 30 s), so p50/p95 are upper bounds, not exact values.",
+    "Zero-result terms are shown only at 3+ uses, with likely names, emails and numbers dropped.",
 ]
 
 
@@ -465,6 +512,21 @@ def format_report(r: Dict[str, Any]) -> str:
     lines.append("Features by use (top to bottom)")
     totals = sorted(r["usage"]["totals"].items(), key=lambda kv: -kv[1])
     lines += [f"  {k.ljust(14)}{str(v).rjust(6)}" for k, v in totals] or ["  (none)"]
+    lines.append("")
+
+    f = r.get("features", {})
+    lines.append("Features by call (MCP tools, Ask, cron jobs)")
+    lines += [f"  {k.ljust(24)}{str(v).rjust(6)}" for k, v in f.get("calls", {}).items()] or ["  (none)"]
+    lines.append("Durations (ms, bucket upper bound)")
+    lines += [f"  {k.ljust(24)}p50 {str(v.get('p50', '-')).rjust(8)}   p95 {str(v.get('p95', '-')).rjust(8)}"
+              for k, v in f.get("duration_ms", {}).items()] or ["  (none)"]
+    lines.append("Top errors (feature: code)")
+    lines += [f"  {k.ljust(40)}{str(v).rjust(6)}" for k, v in f.get("errors", {}).items()] or ["  (none)"]
+    lines.append("Zero results (count, share of calls)")
+    lines += [f"  {k.ljust(24)}{str(v['count']).rjust(6)}   {_pct(v['rate'])}"
+              for k, v in f.get("zero_results", {}).items()] or ["  (none)"]
+    lines.append(f"Zero-result terms (count >= {ZERO_QUERY_MIN_COUNT})")
+    lines += [f"  {k.ljust(24)}{str(v).rjust(6)}" for k, v in f.get("zero_result_terms", {}).items()] or ["  (none)"]
     lines.append("")
 
     t = r["triage"]

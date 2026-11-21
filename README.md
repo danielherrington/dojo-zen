@@ -96,7 +96,7 @@ uv run dojo recap --send-email
 | `dojo mcp [--transport stdio]` | Run the Model Context Protocol (MCP) server over `stdio` or `sse` |
 | `dojo seed-firestore` | Migrate local SQLite data and session cookies to Google Cloud Firestore |
 | `dojo status` | View session health, student counts, and database stats |
-| `dojo analytics report [--days 7] [--json]` | Analyst report: daily activity by channel, alert/digest funnels, feature use, triage categories and false-alarm guards |
+| `dojo analytics report [--days 7] [--json]` | Analyst report: daily activity by channel, alert/digest funnels, feature use, per-tool calls, top errors, zero results and terms, p50/p95 durations, triage categories and false-alarm guards |
 
 ---
 
@@ -107,7 +107,8 @@ DojoZen follows the herrington.usage.v1 analytics standard (DAN-200, DAN-205, DA
 - **Email funnels.** A random 32-hex id per briefing or alert lets us count sent → opened → clicked. Opens come from a 1×1 pixel and clicks from a same-site redirect. No addresses, subjects or IPs are stored, and opens are labelled only `gmail_proxy` / `other`.
 - **Usage.** Daily request counts per channel: portal, API, Ask, MCP, SMS.
 - **Alert triage.** Daily counts of which triage category fired (health, logistics, …) and which false-alarm guard (negation, policy reminder, paperwork) suppressed a keyword. **Message text is never stored or logged.**
-- **v1 log events.** One JSON line per event in Cloud Logging. `actor` is a salted hash of the access token (omitted without `ANALYTICS_SALT`); email events have no actor.
+- **Per-feature calls (DAN-284).** Daily counts per MCP tool, Ask and cron job: calls, errors (exception class name only, never the message), zero results, and duration buckets for p50/p95. When a search or Ask finds nothing, it counts up to 6 normalised words from the query. Stopwords, numbers, emails, capitalised words and the children's names are dropped, and the report shows a word only once it reaches 3 uses. Query text never goes into an event line.
+- **v1 log events.** One JSON line per event in Cloud Logging. The events are `feature_used`, `error` (with `code`), `zero_result` and `triage`, with props `duration_ms` and `result_count`. `actor` is a salted hash of the access token (omitted without `ANALYTICS_SALT`); email events have no actor.
 - **Retention.** Per-event rows: 90 days. Daily counters: 400 days. Both are enforced by Firestore TTL.
 - **Off switch.** `ANALYTICS=off` disables all of it. `EMAIL_TRACKING=false` and `USAGE_ANALYTICS=false` turn off one part each.
 

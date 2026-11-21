@@ -17,6 +17,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import sys
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Optional
@@ -150,3 +151,161 @@ def record_triage(db: Any, decision: Any, day: Optional[str] = None) -> None:
         "item_type": decision.item_type,
         "guards": guards,
     })
+
+
+# --- Calls, errors, zero results and durations (DAN-284) ---
+# Daily counters on the existing dojo_usage/{day} docs (400-day TTL), with prefixed field names so the
+# report can split them from channel totals. Per-event lines carry only names, codes, counts and ms.
+
+TOOL_PREFIX = "tool__"      # per-feature calls: tool__search_feed, tool__ask
+ERROR_PREFIX = "error__"    # error__<feature>__<code>
+ZERO_PREFIX = "zero__"      # zero__<feature>: calls that found nothing
+ZQ_PREFIX = "zq__"          # zq__<token>: normalised tokens from zero-result queries (shown only at count >= 3)
+DUR_PREFIX = "dur__"        # dur__<feature>__<bucket upper bound ms | inf>
+DURATION_BUCKETS = (50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000)
+ZERO_QUERY_MIN_COUNT = 3
+
+_STOPWORDS = frozenset("""
+a about after all also am an and any are as at be been before but by can could did do does for from get got
+had has have how i if in into is it its just me my need needs next no not of on or our out over please so
+some than that the their them then there these they this to today tomorrow up us was we week were what
+when where which who why will with would you your yet any anything else does there
+""".split())
+_WORD = re.compile(r"[A-Za-z][A-Za-z'-]*")
+
+
+def duration_bucket(ms: float) -> str:
+    for upper in DURATION_BUCKETS:
+        if ms <= upper:
+            return str(upper)
+    return "inf"
+
+
+def _safe_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9_]", "_", value.lower())[:48] or "unknown"
+
+
+def query_tokens(text: Optional[str], names: Iterable[str] = ()) -> list:
+    """Normalised, privacy-filtered tokens from a query that found nothing.
+
+    Drops stopwords, short or long words, anything with digits or '@', words capitalised mid-sentence
+    (likely names) and the given known names. At most 6 tokens.
+    """
+    text = re.sub(r"\S+@\S+", " ", text or "")
+    blocked = {n.lower() for name in names for n in str(name).split() if n}
+    out = []
+    for i, m in enumerate(_WORD.finditer(re.sub(r"\S*\d\S*", " ", text))):
+        word = m.group(0).strip("'-")
+        low = word.lower()
+        if i > 0 and word[:1].isupper():
+            continue
+        if len(low) < 3 or len(low) > 20 or low in _STOPWORDS or low in blocked or low in out:
+            continue
+        out.append(low)
+        if len(out) == 6:
+            break
+    return out
+
+
+def result_count(result: Any) -> Optional[int]:
+    """How many things a tool returned, or None if that isn't meaningful."""
+    if result is None:
+        return 0
+    if hasattr(result, "model_dump"):
+        result = result.model_dump()
+    if isinstance(result, (list, tuple)):
+        return len(result)
+    if isinstance(result, dict):
+        for key in ("items", "assignments", "results", "sources"):
+            if isinstance(result.get(key), list):
+                return len(result[key])
+        return None
+    if isinstance(result, str):
+        return 1 if result.strip() else 0
+    return None
+
+
+def call_counter_names(feature: str, duration_ms: float, error_code: Optional[str] = None,
+                       zero: bool = False, tokens: Iterable[str] = ()) -> list:
+    f = _safe_key(feature)
+    names = [f"{TOOL_PREFIX}{f}", f"{DUR_PREFIX}{f}__{duration_bucket(duration_ms)}"]
+    if error_code:
+        names.append(f"{ERROR_PREFIX}{f}__{_safe_key(error_code)}")
+    elif zero:
+        names.append(f"{ZERO_PREFIX}{f}")
+        names += [f"{ZQ_PREFIX}{_safe_key(t)}" for t in tokens]
+    return names
+
+
+def _bump(db: Any, names: Iterable[str], day: Optional[str] = None, background: bool = True) -> None:
+    if db is None or not hasattr(db, "increment_usage"):
+        return
+    from dojo.tz import family_now
+
+    day = day or family_now().date().isoformat()
+    names = list(names)
+
+    def _do() -> None:
+        for name in names:
+            try:
+                db.increment_usage(day, name)
+            except Exception as e:
+                logger.warning(f"Usage counter write failed: {type(e).__name__}")
+                return
+
+    if background:
+        import threading
+        threading.Thread(target=_do, daemon=True).start()
+    else:
+        _do()
+
+
+def record_call(
+    db: Any,
+    feature: str,
+    channel: str,
+    duration_ms: float,
+    *,
+    result: Any = None,
+    error_code: Optional[str] = None,
+    query: Optional[str] = None,
+    names: Iterable[str] = (),
+    zero: Optional[bool] = None,
+    background: bool = True,
+) -> None:
+    """Count one call of a feature (tool, endpoint, cron job) and emit its events. Never raises.
+
+    ``query`` is used only for zero-result token counters (filtered by ``query_tokens``); it is never
+    put in an event line.
+    """
+    try:
+        if not _settings().analytics_enabled:
+            return
+        count = None if error_code else result_count(result)
+        if zero is None:
+            zero = count == 0
+        tokens = query_tokens(query, names) if (zero and query and not error_code) else []
+        _bump(db, call_counter_names(feature, duration_ms, error_code, zero, tokens), background=background)
+        props: Dict[str, Any] = {"duration_ms": int(duration_ms)}
+        if count is not None:
+            props["result_count"] = count
+        if error_code:
+            emit("error", channel, feature=feature, props={**props, "code": _safe_key(error_code)})
+        else:
+            emit("feature_used", channel, feature=feature, props=props)
+            if zero:
+                emit("zero_result", channel, feature=feature, props={"duration_ms": int(duration_ms)})
+    except Exception as e:  # analytics must never break the feature
+        logger.warning(f"record_call failed: {type(e).__name__}")
+
+
+def record_error(db: Any, feature: str, channel: str, error: Any, background: bool = True) -> None:
+    """Count a failure by exception class name (never its message text)."""
+    try:
+        if not _settings().analytics_enabled:
+            return
+        code = _safe_key(error if isinstance(error, str) else type(error).__name__)
+        _bump(db, [f"{ERROR_PREFIX}{_safe_key(feature)}__{code}"], background=background)
+        emit("error", channel, feature=feature, props={"code": code})
+    except Exception as e:
+        logger.warning(f"record_error failed: {type(e).__name__}")
