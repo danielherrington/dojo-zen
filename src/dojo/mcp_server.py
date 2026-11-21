@@ -40,11 +40,62 @@ def _get_db():
     return get_database()
 
 
+def _known_names(db: Any) -> List[str]:
+    """Child names to keep out of zero-result query tokens."""
+    names: List[str] = []
+    try:
+        from dojo import logistics
+        names += [k["child"] for k in logistics.family_schools(db)]
+        names += [c.get("name") or "" for c in db.get_all_children()]
+    except Exception:
+        pass
+    return names
+
+
+def _tracked(fn):
+    """Count each call of an MCP tool (DAN-284): feature_used, duration, zero results, errors.
+
+    functools.wraps keeps the name, docstring, annotations and signature (via __wrapped__), so the
+    tool's MCP schema is unchanged. Analytics failures never reach the caller.
+    """
+    import functools
+    import inspect
+    import time
+
+    sig = inspect.signature(fn)
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        from dojo.usage_v1 import record_call
+
+        start = time.monotonic()
+        result, error = None, None
+        try:
+            result = fn(*args, **kwargs)
+            return result
+        except Exception as e:
+            error = type(e).__name__
+            raise
+        finally:
+            try:
+                bound = sig.bind_partial(*args, **kwargs).arguments
+                query = bound.get("query") or bound.get("question")
+                db = _get_db()
+                record_call(db, fn.__name__, "mcp", (time.monotonic() - start) * 1000, result=result,
+                            error_code=error, query=query if isinstance(query, str) else None,
+                            names=_known_names(db) if query else ())
+            except Exception:
+                pass
+
+    return wrapper
+
+
 # ---------------------------------------------------------------------------
 # MCP Tools
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@_tracked
 def get_daily_briefing(force: bool = False) -> str:
     """Generate the strictly daily-focused anti-bloat briefing for parents, summarizing action items
     and events for Today + Tomorrow plus any new teacher announcements/highlights from the last 24 hours.
@@ -69,6 +120,7 @@ def get_daily_briefing(force: bool = False) -> str:
 
 
 @mcp.tool()
+@_tracked
 def get_action_items() -> List[Dict[str, Any]]:
     """Get all extracted action items (supplies to bring, homework packets, clothing requirements,
     permission slips) from recent teacher posts and Class Updates, ranked by urgency.
@@ -99,6 +151,7 @@ def get_action_items() -> List[Dict[str, Any]]:
 
 
 @mcp.tool()
+@_tracked
 def get_upcoming_dates() -> List[Dict[str, Any]]:
     """List upcoming school events, early dismissals, holidays, field trips, and deadlines
     from the school calendar, Class Updates, and teacher announcements.
@@ -129,6 +182,7 @@ def get_upcoming_dates() -> List[Dict[str, Any]]:
 
 
 @mcp.tool()
+@_tracked
 def ask_classroom_assistant(question: str) -> Dict[str, Any]:
     """Ask a natural language question about your child's classroom, schedule, teacher instructions,
     or school activities (e.g. 'What does she need for gym?', 'When is the Hispanic Heritage project due?').
@@ -149,6 +203,7 @@ def ask_classroom_assistant(question: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
+@_tracked
 def search_feed(query: str, limit: int = 10) -> List[Dict[str, Any]]:
     """Search classroom announcements, Class Updates, and stories by keyword, topic, or teacher name.
 
@@ -203,6 +258,7 @@ def search_feed(query: str, limit: int = 10) -> List[Dict[str, Any]]:
 
 
 @mcp.tool()
+@_tracked
 def get_recent_feed(limit: int = 15) -> List[Dict[str, Any]]:
     """Get the most recent classroom announcements and Class Updates from ClassDojo with author, timestamp, content,
     and direct deep links (filtering out noisy marketing/bloat).
@@ -256,6 +312,7 @@ def get_recent_feed(limit: int = 15) -> List[Dict[str, Any]]:
 
 
 @mcp.tool()
+@_tracked
 def get_feed_item(item_id: str) -> Optional[Dict[str, Any]]:
     """Get the full details of a specific ClassDojo feed announcement or Class Update by its unique ID.
 
@@ -293,6 +350,7 @@ def get_feed_item(item_id: str) -> Optional[Dict[str, Any]]:
 
 
 @mcp.tool()
+@_tracked
 def get_enrolled_children() -> List[Dict[str, Any]]:
     """List enrolled children, their student IDs, and their assigned classrooms."""
     db = _get_db()
@@ -315,6 +373,7 @@ def get_enrolled_children() -> List[Dict[str, Any]]:
 # --- School & Family Logistics (DAN-251), read-only ---
 
 @mcp.tool()
+@_tracked
 def school_today(date: Optional[str] = None) -> List[Dict[str, Any]]:
     """Per-child school summary for a day: school events plus action items due today/tomorrow.
     Children whose school isn't connected yet come back with status "not_connected".
@@ -327,6 +386,7 @@ def school_today(date: Optional[str] = None) -> List[Dict[str, Any]]:
 
 
 @mcp.tool()
+@_tracked
 def school_upcoming(days: int = 14, start: Optional[str] = None) -> Dict[str, Any]:
     """Upcoming school dates: days off, early dismissals, deadlines and events (title and date only).
 
@@ -339,6 +399,7 @@ def school_upcoming(days: int = 14, start: Optional[str] = None) -> Dict[str, An
 
 
 @mcp.tool()
+@_tracked
 def pickup_owner(date: Optional[str] = None, kind: str = "any") -> Dict[str, Any]:
     """Who has school pickup or drop-off on a date: the Family Schedule Helper's weekly plan
     (default caregiver, rerouted by travel cover), or the Family calendar each event sits on when

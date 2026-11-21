@@ -2,6 +2,7 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+import time
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, Form, Header, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -219,7 +220,20 @@ async def ask_question(req: AskRequest):
     """Answer natural language queries using grounded classroom data."""
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="Query cannot be empty")
-    return qa_engine.answer_question(req.query)
+    from dojo.mcp_server import _known_names
+    from dojo.usage_v1 import record_call
+
+    start = time.monotonic()
+    try:
+        result = qa_engine.answer_question(req.query)
+    except Exception as e:
+        record_call(db, "ask", "web", (time.monotonic() - start) * 1000, error_code=type(e).__name__)
+        raise
+    # Zero result = no grounded source behind the answer.
+    record_call(db, "ask", "web", (time.monotonic() - start) * 1000, result=result,
+                zero=not result.sources, query=req.query if not result.sources else None,
+                names=_known_names(db) if not result.sources else ())
+    return result
 
 
 @app.get("/api/briefing")
@@ -421,6 +435,8 @@ async def sync_now():
             "updated_items": upd_feed + upd_msg + upd_ev
         }
     except Exception as e:
+        from dojo.usage_v1 import record_error
+        record_error(db, "classdojo_sync", "web", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -508,6 +524,8 @@ async def cron_sync_school_email(
     try:
         return {"status": "ok", **school_email.sync(db)}
     except Exception as e:
+        from dojo.usage_v1 import record_error
+        record_error(db, "school_email_sync", "cron", e)
         logger.error(f"School email sync failed: {type(e).__name__}")
         raise HTTPException(status_code=500, detail="School email sync failed.")
 
@@ -547,6 +565,8 @@ async def cron_check_alerts(
             "alerts": serialized_alerts
         }
     except Exception as e:
+        from dojo.usage_v1 import record_error
+        record_error(db, "check_alerts", "cron", e)
         logger.error(f"Cron check-alerts error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -572,15 +592,22 @@ async def cron_daily_digest(
                 db.upsert_events(client.get_events())
                 client.close()
             except Exception as e:
+                from dojo.usage_v1 import record_error
+                record_error(db, "classdojo_sync", "cron", e)
                 logger.warning(f"ClassDojo sync failed: {e}")
         else:
             logger.warning("ClassDojo session not authenticated; compiling briefing from cached items.")
 
         # 2. Compile and dispatch daily briefing
         from dojo.mailer import dispatch_daily_briefing
+        from dojo.usage_v1 import record_call
+        start = time.monotonic()
         result = dispatch_daily_briefing(db=db, force=force)
+        record_call(db, "daily_digest", "cron", (time.monotonic() - start) * 1000, zero=False)
         return {"status": "ok", "dispatch": result}
     except Exception as e:
+        from dojo.usage_v1 import record_error
+        record_error(db, "daily_digest", "cron", e)
         logger.error(f"Cron daily-digest error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
