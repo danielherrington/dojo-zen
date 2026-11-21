@@ -219,3 +219,89 @@ def test_catalog_endpoint(db, monkeypatch):
     assert {"school_today", "school_upcoming", "pickup_owner"} <= {t["name"] for t in body["tools"]}
     assert all(t["access"] == "read" for t in body["tools"])
     assert "last_health_check" in body and body["auth_model"]
+
+
+# --- DAN-396: Family Schedule Helper weekly plan (synthetic family only) ---
+
+SETUP = {
+    "caregivers": [
+        {"id": "cg1", "name": "Parent One", "calendarId": "p1@test"},
+        {"id": "cg2", "name": "Parent Two", "calendarId": "p2@test"},
+        {"id": "cg3", "name": "Sitter Three", "calendarId": "s3@test"},
+    ],
+    "children": [
+        {"id": "k1", "name": "Kid A", "school": "Test Elementary"},
+        {"id": "k2", "name": "Kid B", "school": "Lehrman Test Academy"},
+        {"id": "dog", "name": "Rex", "school": "", "isPet": True},
+    ],
+    "blueprints": [
+        {"id": "b1", "title": "Kid A drop-off", "childId": "k1", "category": "dropoff", "daysOfWeek": [1, 2, 3, 4, 5],
+         "startTime": "07:50", "endTime": "08:15", "location": "1 Secret Lane", "defaultCaregiverId": "cg1"},
+        {"id": "b2", "title": "Kid A pickup", "childId": "k1", "category": "pickup", "daysOfWeek": [5],
+         "startTime": "15:15", "endTime": "15:45", "location": "1 Secret Lane", "defaultCaregiverId": "cg2",
+         "notes": "gate code 1234"},
+        {"id": "b3", "title": "Kid B pickup", "childId": "k2", "category": "pickup", "daysOfWeek": [1],
+         "startTime": "15:00", "endTime": "15:30", "location": "2 Hidden Rd", "defaultCaregiverId": "cg2"},
+        {"id": "b4", "title": "Swim", "childId": "k2", "category": "activity", "daysOfWeek": [5],
+         "startTime": "17:00", "endTime": "18:00", "location": "Pool", "defaultCaregiverId": "cg1"},
+        {"id": "b5", "title": "Dog walk", "childId": "dog", "category": "pickup", "daysOfWeek": [5],
+         "startTime": "12:00", "endTime": "12:30", "location": "Park", "defaultCaregiverId": "cg3"},
+    ],
+    "travels": [{"id": "t1", "caregiverId": "cg2", "routeToCaregiverId": "cg3",
+                 "startDate": "2026-11-27", "endDate": "2026-11-29"}],
+}
+
+
+@pytest.fixture
+def no_overrides(monkeypatch):
+    for name in ("FAMILY_SCHOOLS", "FAMILY_PICKUP_CALENDARS", "FAMILY_SETUP_PROJECT", "K_SERVICE"):
+        monkeypatch.delenv(name, raising=False)
+    logistics._SETUP_CACHE.clear()
+
+
+def test_weekly_plan_friday_owners_without_locations_or_notes(no_overrides):
+    out = logistics.pickup_owner("2026-11-20", calendars={}, setup=SETUP)  # a Friday
+    assert out["status"] == "ok" and out["source"] == "weekly_plan"
+    assert [(a["owner"], a["kind"], a["start"], a["children"]) for a in out["assignments"]] == [
+        ("Parent", "dropoff", "07:50", ["Kid"]), ("Parent", "pickup", "15:15", ["Kid"])]
+    text = json.dumps(out)
+    assert "Secret Lane" not in text and "1234" not in text and "Rex" not in text and "Swim" not in text
+    assert "swaps" in out["note"]
+
+
+def test_weekly_plan_kind_filter_and_travel_cover(no_overrides):
+    out = logistics.pickup_owner("2026-11-27", kind="pickup", calendars={}, setup=SETUP)  # Friday, cg2 travelling
+    (only,) = out["assignments"]
+    assert only["owner"] == "Sitter" and only["covering_for"] == "Parent"
+
+
+def test_weekly_plan_empty_day(no_overrides):
+    out = logistics.pickup_owner("2026-11-22", calendars={}, setup=SETUP)  # Sunday
+    assert out["assignments"] == [] and out["note"].startswith("No pickup or drop-off")
+
+
+def test_ical_feeds_win_over_the_weekly_plan(no_overrides):
+    out = logistics.pickup_owner("2026-11-20", calendars=CALENDARS, fetch=FEEDS.__getitem__, setup=SETUP)
+    assert "source" not in out and {a["owner"] for a in out["assignments"]} <= {"Daniel", "Lu"}
+
+
+def test_setup_project_defaults_and_off(no_overrides, monkeypatch):
+    monkeypatch.delenv("USE_FIRESTORE", raising=False)
+    assert logistics.setup_project() is None
+    monkeypatch.setenv("USE_FIRESTORE", "true")
+    assert logistics.setup_project() == "family-schedule-helper"
+    monkeypatch.setenv("FAMILY_SETUP_PROJECT", "off")
+    assert logistics.setup_project() is None
+
+
+def test_family_setup_caches_and_survives_errors(no_overrides, monkeypatch):
+    monkeypatch.setenv("FAMILY_SETUP_PROJECT", "proj-test")
+    calls = []
+    assert logistics.family_setup(lambda p: calls.append(p) or {"children": []}) == {"children": []}
+    assert logistics.family_setup(lambda p: calls.append(p) or {}) == {"children": []}  # cached
+    assert calls == ["proj-test"]
+    logistics._SETUP_CACHE.clear()
+
+    def boom(_):
+        raise PermissionError("denied")
+    assert logistics.family_setup(boom) is None
