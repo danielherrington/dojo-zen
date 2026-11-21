@@ -302,6 +302,9 @@ gcloud firestore fields ttls list --project=herrington-ai-site
   - `POST /api/cron/sync-school-email` (CRON_SECRET) runs the sync. It returns `not_configured` until the `GMAIL_*` secrets are set.
   - Setup: `scripts/gmail_consent.py <desktop-client.json>` stores `dojo-zen-gmail-client-id`, `-client-secret` and `-refresh-token` in Secret Manager. The OAuth consent screen must be "In production", or Google expires the token after 7 days.
   - With the secrets set, `school_today` and `school_upcoming` treat the `lehrman` source as connected.
+- **School closures on pickups (DAN-436):** `pickup_owner` marks a child's slot `status: "no_school"` on a day off, or adds `school_note` for an early dismissal, and lists `school_closures` by source.
+  - Sources, matched to each child through `FAMILY_SCHOOLS` (by first name, the same names the helper uses): ClassDojo calendar events (`dojo`), school-email items (other sources, DAN-395), and optional public school-calendar feeds in `FAMILY_SCHOOL_CALENDARS` (JSON `{source: public iCal URL}`).
+  - A source that can't be read is skipped and never fails the answer. Without `FAMILY_SCHOOLS`, ClassDojo's full first names rarely match the helper's nicknames, so nothing is marked.
 - **Pickup ownership override: `FAMILY_PICKUP_CALENDARS`** (JSON `{owner: secret iCal URL}`, one per Family calendar). When set, it wins over the helper's weekly plan.
   - Recurring events are expanded with `recurring-ical-events`.
   - An event counts if its title matches pickup/carpool/dismissal or drop-off.
