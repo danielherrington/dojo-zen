@@ -296,6 +296,12 @@ gcloud firestore fields ttls list --project=herrington-ai-site
 - **Children and schools: `FAMILY_SCHOOLS`** (JSON list of `{child, school, source}`).
   - With it unset, the Dojo roster's first names are used.
   - Only `source: "dojo"` is connected. Others, such as `lehrman`, return `status: "not_connected"`.
+- **Lehrman school email (DAN-395):** [`src/dojo/school_email.py`](src/dojo/school_email.py).
+  - Lehrman only communicates by email. Dojo Zen reads Daniel's Gmail with the `gmail.readonly` scope, limited by `LEHRMAN_GMAIL_QUERY` (default: `from:(lehrmanschool.org OR lehrmanschoolorg) newer_than:30d`, which covers staff and the Constant Contact newsletters).
+  - Gemini extracts dated items (day off, early dismissal, deadline, event), with a rule-based fallback. Only date, a title of at most 100 characters, and type are stored, in `school_items` (SQLite) or `dojo_school_items` (Firestore). Bodies, senders and attachments are never stored, returned or logged. Each message is processed once.
+  - `POST /api/cron/sync-school-email` (CRON_SECRET) runs the sync. It returns `not_configured` until the `GMAIL_*` secrets are set.
+  - Setup: `scripts/gmail_consent.py <desktop-client.json>` stores `dojo-zen-gmail-client-id`, `-client-secret` and `-refresh-token` in Secret Manager. The OAuth consent screen must be "In production", or Google expires the token after 7 days.
+  - With the secrets set, `school_today` and `school_upcoming` treat the `lehrman` source as connected.
 - **Pickup ownership override: `FAMILY_PICKUP_CALENDARS`** (JSON `{owner: secret iCal URL}`, one per Family calendar). When set, it wins over the helper's weekly plan.
   - Recurring events are expanded with `recurring-ical-events`.
   - An event counts if its title matches pickup/carpool/dismissal or drop-off.

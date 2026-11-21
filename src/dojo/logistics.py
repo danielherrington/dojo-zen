@@ -10,6 +10,9 @@ Three questions, each answered with the minimum a conversation needs:
      caregiver for each pickup/drop-off, rerouted by travel cover. One-day swaps made in the helper
      live only on Google Calendar and are not visible from this source.
 
+Lehrman (DAN-395) is email only: ``dojo.school_email`` syncs dated items from its emails, and
+``school_*`` treat the ``lehrman`` source as connected once that Gmail sync is configured.
+
 Privacy: this repo is public, so children, schools and calendar feeds come from env, never code.
 No message bodies, descriptions, photos, attachments or sender names are returned. ``pickup_owner``
 refuses on Cloud Run unless REQUIRE_AUTH is on: pickup times are safety-sensitive.
@@ -38,6 +41,20 @@ from dojo.tz import family_now, family_tz, to_family_tz
 logger = logging.getLogger(__name__)
 
 CONNECTED_SOURCES = {"dojo"}
+
+
+def connected_sources() -> set:
+    """ClassDojo, plus Lehrman once its read-only Gmail sync is configured (DAN-395)."""
+    from dojo import school_email
+
+    return CONNECTED_SOURCES | ({school_email.SOURCE} if school_email.gmail_configured() else set())
+
+
+def _email_items(db: Any, source: str, start: date_cls, end: date_cls) -> List[Dict[str, Any]]:
+    if not hasattr(db, "get_school_items"):
+        return []
+    rows = db.get_school_items(source, start.isoformat(), end.isoformat())
+    return [{"date": r["date"], "title": r["title"], "type": r["type"]} for r in rows]
 
 _DAY_OFF = re.compile(r"\b(no school|school (is )?closed|closed|holiday|teacher (planning|work ?day)|"
                       r"professional development|in-?service|winter break|spring break|thanksgiving break)\b", re.I)
@@ -193,11 +210,21 @@ def school_today(db: Any, day: Optional[str] = None) -> List[Dict[str, Any]]:
             ],
         }
 
+    connected = connected_sources()
     out = []
     for kid in kids:
         entry = {"child": kid["child"], "school": kid["school"], "date": target.isoformat(), "source": kid["source"]}
         if kid["source"] == "dojo" and dojo_summary is not None:
             entry.update(status="ok", **dojo_summary)
+        elif kid["source"] in connected and kid["source"] != "dojo":
+            # School email items: today's dated items, plus deadlines due today or tomorrow.
+            soon = _email_items(db, kid["source"], target, target + timedelta(days=1))
+            entry.update(
+                status="ok",
+                events=[{"date": i["date"], "title": i["title"], "type": i["type"]}
+                        for i in soon if i["date"] == target.isoformat() and i["type"] != "deadline"],
+                action_items=[{"summary": i["title"], "due": i["date"]} for i in soon if i["type"] == "deadline"],
+            )
         else:
             entry.update(status="not_connected",
                          note=f"No data source for '{kid['source']}' yet; nothing is known for this child today.")
@@ -227,7 +254,11 @@ def school_upcoming(db: Any, days: int = 14, start: Optional[str] = None) -> Dic
         items.append({"date": None, "date_text": d.date_str, "title": d.title, "type": classify(d.title),
                       "source": "dojo_posts"})
 
-    not_connected = sorted({k["source"] for k in family_schools(db)} - CONNECTED_SOURCES)
+    connected = connected_sources()
+    for source in sorted(connected - CONNECTED_SOURCES):
+        items.extend(dict(i, source=source) for i in _email_items(db, source, first, last))
+    items.sort(key=lambda e: (e.get("date") is None, e.get("date") or ""))
+    not_connected = sorted({k["source"] for k in family_schools(db)} - connected)
     return {"from": first.isoformat(), "to": last.isoformat(), "items": items, "sources_not_connected": not_connected}
 
 

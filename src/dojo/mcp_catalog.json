@@ -13,7 +13,7 @@
   "last_health_check": null,
   "data_sources": {
     "dojo": "ClassDojo via Dojo Zen sync (connected)",
-    "lehrman": "not connected",
+    "lehrman": "school emails via read-only Gmail sync (dated titles only; connected once GMAIL_* secrets are set)",
     "family_schedule_helper": "Family Schedule Helper weekly plan (Firestore family/setup, read-only; one-day swaps not visible)",
     "family_calendars": "private iCal feeds via FAMILY_PICKUP_CALENDARS (optional override, not configured)"
   },

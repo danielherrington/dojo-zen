@@ -59,6 +59,10 @@ class FirestoreDojoDatabase:
         return self.client.collection("dojo_events")
 
     @property
+    def school_col(self):
+        return self.client.collection("dojo_school_items")
+
+    @property
     def child_col(self):
         return self.client.collection("dojo_children")
 
@@ -571,6 +575,39 @@ class FirestoreDojoDatabase:
         items = [d.to_dict() for d in docs]
         items.sort(key=lambda x: x.get("start_time") or "")
         return items
+
+    # --- School email items (DAN-395): titles and dates only, never bodies ---
+
+    def upsert_school_items(self, items: List[Dict[str, Any]]) -> int:
+        now = utc_now_iso()
+        batch = self.client.batch()
+        for n, it in enumerate(items, start=1):
+            batch.set(self.school_col.document(it["id"]), {
+                "id": it["id"], "source": it["source"], "message_id": it["message_id"], "date": it.get("date"),
+                "title": it.get("title", ""), "type": it["type"], "received_at": it.get("received_at"),
+                "fetched_at": now,
+            })
+            if n % 400 == 0:
+                batch.commit()
+                batch = self.client.batch()
+        batch.commit()
+        return len(items)
+
+    def get_school_message_ids(self, source: str) -> List[str]:
+        docs = self.school_col.where("source", "==", source).stream()
+        return sorted({d.to_dict().get("message_id") for d in docs})
+
+    def get_school_items(self, source: Optional[str] = None, start: Optional[str] = None,
+                         end: Optional[str] = None) -> List[Dict[str, Any]]:
+        query = self.school_col.where("source", "==", source) if source else self.school_col
+        out = []
+        for d in query.stream():
+            it = d.to_dict()
+            day = it.get("date")
+            if it.get("type") == "seen" or not day or (start and day < start) or (end and day > end):
+                continue
+            out.append(it)
+        return sorted(out, key=lambda x: (x["date"], x["id"]))
 
     def get_all_children(self) -> List[Dict[str, Any]]:
         docs = self.child_col.stream()
