@@ -254,7 +254,7 @@ SETUP = {
 
 @pytest.fixture
 def no_overrides(monkeypatch):
-    for name in ("FAMILY_SCHOOLS", "FAMILY_PICKUP_CALENDARS", "FAMILY_SETUP_PROJECT", "K_SERVICE"):
+    for name in ("FAMILY_SCHOOLS", "FAMILY_PICKUP_CALENDARS", "FAMILY_SETUP_PROJECT", "FAMILY_SCHOOL_CALENDARS", "K_SERVICE"):
         monkeypatch.delenv(name, raising=False)
     logistics._SETUP_CACHE.clear()
 
@@ -305,3 +305,87 @@ def test_family_setup_caches_and_survives_errors(no_overrides, monkeypatch):
     def boom(_):
         raise PermissionError("denied")
     assert logistics.family_setup(boom) is None
+
+
+# --- DAN-436: school closures mark the affected child's slots ---
+
+SCHOOLS_TWO = [{"child": "Kid", "school": "Test Elementary", "source": "dojo"},
+               {"child": "Bea", "school": "Test Academy", "source": "academy"}]
+SETUP_TWO = {
+    "caregivers": [{"id": "cg1", "name": "Parent One"}],
+    "children": [{"id": "k1", "name": "Kid A"}, {"id": "k2", "name": "Bea B"}],
+    "blueprints": [
+        {"id": "b1", "childId": "k1", "category": "pickup", "daysOfWeek": [3], "startTime": "15:00",
+         "endTime": "15:30", "defaultCaregiverId": "cg1"},
+        {"id": "b2", "childId": "k2", "category": "pickup", "daysOfWeek": [3], "startTime": "15:10",
+         "endTime": "15:40", "defaultCaregiverId": "cg1"},
+    ],
+}
+ACADEMY_ICS = """BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//test//EN
+BEGIN:VEVENT
+UID:break@test
+DTSTART;VALUE=DATE:20261126
+DTEND;VALUE=DATE:20261128
+SUMMARY:Thanksgiving Break - No School
+END:VEVENT
+BEGIN:VEVENT
+UID:early@test
+DTSTART;VALUE=DATE:20261125
+DTEND;VALUE=DATE:20261126
+SUMMARY:Early Dismissal 12:30
+END:VEVENT
+END:VCALENDAR
+"""
+
+
+class _ClosureDB:
+    def __init__(self, events=(), items=()):
+        self._events, self._items = list(events), list(items)
+
+    def get_all_events(self):
+        return self._events
+
+    def get_school_items(self, source, start, end):
+        return [i for i in self._items if i["source"] == source and start <= i["date"] <= end]
+
+
+def _owner(day, db, monkeypatch, feeds=None):
+    if feeds:
+        monkeypatch.setenv("FAMILY_SCHOOL_CALENDARS", json.dumps({"academy": "https://cal.test/academy.ics"}))
+    return logistics.pickup_owner(day, calendars={}, setup=SETUP_TWO, db=db, schools=SCHOOLS_TWO,
+                                  fetch=(feeds or {}).__getitem__)
+
+
+def test_day_off_from_school_feed_clears_only_that_child(no_overrides, monkeypatch):
+    out = _owner("2026-11-25", _ClosureDB(), monkeypatch, {"https://cal.test/academy.ics": ACADEMY_ICS})
+    by_kid = {a["children"][0]: a for a in out["assignments"]}
+    assert "status" not in by_kid["Kid"]
+    assert by_kid["Bea"]["school_note"].startswith("Early Dismissal") and "status" not in by_kid["Bea"]
+    # 2026-12-02 is also a Wednesday, but the break ends 11/27: no marks.
+    assert "school_closures" not in _owner("2026-12-02", _ClosureDB(), monkeypatch,
+                                           {"https://cal.test/academy.ics": ACADEMY_ICS})
+
+
+def test_dojo_event_and_email_item_mark_no_school(no_overrides, monkeypatch):
+    db = _ClosureDB(events=[{"title": "No School - Thanksgiving", "start_time": "2026-11-25"}],
+                    items=[{"source": "academy", "date": "2026-11-25", "type": "early_dismissal",
+                            "title": "Noon dismissal"}])
+    out = _owner("2026-11-25", db, monkeypatch)
+    by_kid = {a["children"][0]: a for a in out["assignments"]}
+    assert by_kid["Kid"]["status"] == "no_school" and "Thanksgiving" in by_kid["Kid"]["school_note"]
+    assert by_kid["Bea"]["school_note"] == "Noon dismissal"
+    assert {c["source"] for c in out["school_closures"]} == {"dojo", "academy"}
+
+
+def test_unreadable_school_feed_never_fails_the_answer(no_overrides, monkeypatch):
+    monkeypatch.setenv("FAMILY_SCHOOL_CALENDARS", json.dumps({"academy": "https://cal.test/missing.ics"}))
+    out = logistics.pickup_owner("2026-11-25", calendars={}, setup=SETUP_TWO, db=_ClosureDB(),
+                                 schools=SCHOOLS_TWO, fetch={}.__getitem__)
+    assert out["status"] == "ok" and len(out["assignments"]) == 2 and "school_closures" not in out
+
+
+def test_no_db_keeps_previous_behaviour(no_overrides):
+    out = logistics.pickup_owner("2026-11-25", calendars={}, setup=SETUP_TWO)
+    assert "school_closures" not in out and all("status" not in a for a in out["assignments"])

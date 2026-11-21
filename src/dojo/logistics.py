@@ -296,6 +296,24 @@ def pickup_owner(
     fetch: Callable[[str], str] = _fetch_ics,
     children: Optional[List[str]] = None,
     setup: Optional[Dict[str, Any]] = None,
+    db: Any = None,
+    schools: Optional[List[Dict[str, str]]] = None,
+) -> Dict[str, Any]:
+    """Who has each pickup/drop-off, with each child's slot marked when their school is closed or
+    dismisses early that day (DAN-436). ``db``/``schools`` enable the closure check."""
+    result = _pickup_assignments(day, kind, calendars, fetch, children, setup)
+    if db is not None and result.get("status") == "ok":
+        apply_school_closures(result, db, schools if schools is not None else family_schools(db), fetch=fetch)
+    return result
+
+
+def _pickup_assignments(
+    day: Optional[str],
+    kind: str,
+    calendars: Optional[Dict[str, str]],
+    fetch: Callable[[str], str],
+    children: Optional[List[str]],
+    setup: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
     import icalendar
     import recurring_ical_events
@@ -385,6 +403,82 @@ def pickup_from_weekly_plan(setup: Dict[str, Any], target: date_cls, kind: str =
               "note": WEEKLY_PLAN_NOTE}
     if not assignments:
         result["note"] = "No pickup or drop-off in the weekly plan for this date. " + WEEKLY_PLAN_NOTE
+    return result
+
+
+# --- School closures (DAN-436): no school / early dismissal per child's school ---
+
+CLOSURE_TYPES = ("day_off", "early_dismissal")
+
+
+def school_calendars() -> Dict[str, str]:
+    """Optional public school-calendar iCal feeds by source, e.g. {"dojo": url, "lehrman": url}."""
+    cals = _json_env("FAMILY_SCHOOL_CALENDARS", {})
+    return {str(k): str(v) for k, v in cals.items()} if isinstance(cals, dict) else {}
+
+
+def school_closures(
+    db: Any, day: date_cls, sources: List[str], fetch: Callable[[str], str] = _fetch_ics,
+) -> Dict[str, Dict[str, str]]:
+    """{source: {"type", "title"}} for each school source closed or dismissing early on ``day``.
+
+    Sources: ClassDojo calendar events (``dojo``), school-email items (other sources) and the
+    optional FAMILY_SCHOOL_CALENDARS feeds. A day off outranks an early dismissal. Any source that
+    can't be read is skipped, never failing the pickup answer.
+    """
+    found: Dict[str, List[Dict[str, str]]] = {s: [] for s in sources}
+    if "dojo" in found:
+        found["dojo"] += [e for e in _dojo_events_between(db, day, day) if e["type"] in CLOSURE_TYPES]
+    if hasattr(db, "get_school_items"):
+        for src in found:
+            if src == "dojo":
+                continue
+            try:
+                rows = db.get_school_items(src, day.isoformat(), day.isoformat())
+            except Exception as e:
+                logger.warning(f"Could not read {src} school items: {type(e).__name__}")
+                continue
+            found[src] += [{"type": r["type"], "title": r["title"]} for r in rows if r.get("type") in CLOSURE_TYPES]
+    for src, url in school_calendars().items():
+        if src not in found:
+            continue
+        try:
+            import icalendar
+            import recurring_ical_events
+
+            for ev in recurring_ical_events.of(icalendar.Calendar.from_ical(fetch(url))).at(day):
+                title = str(ev.get("SUMMARY", "")).strip()
+                kind = classify(title)
+                if title and kind in CLOSURE_TYPES:
+                    found[src].append({"type": kind, "title": title})
+        except Exception as e:
+            logger.warning(f"Could not read the {src} school calendar: {type(e).__name__}")
+    out = {}
+    for src, hits in found.items():
+        if hits:
+            best = min(hits, key=lambda h: CLOSURE_TYPES.index(h["type"]))
+            out[src] = {"type": best["type"], "title": best["title"][:100]}
+    return out
+
+
+def apply_school_closures(
+    result: Dict[str, Any], db: Any, schools: List[Dict[str, str]], fetch: Callable[[str], str] = _fetch_ics,
+) -> Dict[str, Any]:
+    """Mark each assignment whose child's school is closed (``no_school``) or dismisses early."""
+    source_of = {k["child"].lower(): k["source"] for k in schools if k.get("child")}
+    day = date_cls.fromisoformat(result["date"])
+    closures = school_closures(db, day, sorted(set(source_of.values())), fetch=fetch)
+    if not closures:
+        return result
+    for a in result.get("assignments", []):
+        hits = [closures[source_of[c.lower()]] for c in a.get("children", []) if source_of.get(c.lower()) in closures]
+        if not hits:
+            continue
+        hit = min(hits, key=lambda h: CLOSURE_TYPES.index(h["type"]))
+        if hit["type"] == "day_off":
+            a["status"] = "no_school"
+        a["school_note"] = hit["title"]
+    result["school_closures"] = [{"source": s, **c} for s, c in sorted(closures.items())]
     return result
 
 

@@ -342,15 +342,19 @@ def school_upcoming(days: int = 14, start: Optional[str] = None) -> Dict[str, An
 def pickup_owner(date: Optional[str] = None, kind: str = "any") -> Dict[str, Any]:
     """Who has school pickup or drop-off on a date: the Family Schedule Helper's weekly plan
     (default caregiver, rerouted by travel cover), or the Family calendar each event sits on when
-    calendar feeds are configured. One-day swaps on Google Calendar aren't visible from the plan.
+    calendar feeds are configured. A child's slots get status "no_school" (or a school_note for
+    an early dismissal) when their school is closed that day. One-day swaps on Google Calendar
+    aren't visible from the plan.
 
     Args:
         date: "today" (default), "tomorrow", or YYYY-MM-DD.
         kind: "any" (default), "pickup" or "dropoff".
     """
     from dojo import logistics
-    children = [k["child"] for k in logistics.family_schools(_get_db())]
-    return logistics.pickup_owner(date, kind=kind, children=children)
+    db = _get_db()
+    schools = logistics.family_schools(db)
+    children = [k["child"] for k in schools]
+    return logistics.pickup_owner(date, kind=kind, children=children, db=db, schools=schools)
 
 
 # ---------------------------------------------------------------------------
