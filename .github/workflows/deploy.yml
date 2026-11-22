@@ -55,32 +55,29 @@ jobs:
         uses: actions/checkout@v4
 
       # Keyless: GitHub OIDC -> Workload Identity Federation. No service-account JSON key.
+      # Without the config this FAILS (DAN-478): a quiet green skip let merged PRs look deployed.
       - name: Check for Workload Identity config
-        id: check_creds
         env:
           WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
           DEPLOY_SA: ${{ vars.GCP_DEPLOY_SA }}
         run: |
           if [ -z "$WIF_PROVIDER" ] || [ -z "$DEPLOY_SA" ]; then
-            echo "has_creds=false" >> "$GITHUB_OUTPUT"
-            echo "### Skipping deploy: GCP_WIF_PROVIDER / GCP_DEPLOY_SA environment variables are not set (see DAN-406)." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "has_creds=true" >> "$GITHUB_OUTPUT"
+            msg="NOT DEPLOYED: GCP_WIF_PROVIDER / GCP_DEPLOY_SA are not set on the production environment (DAN-406, DAN-478). This commit is merged but not live."
+            echo "::error title=Deploy did not run::$msg"
+            echo "### $msg" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
 
       - name: Authenticate to Google Cloud
-        if: steps.check_creds.outputs.has_creds == 'true'
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOY_SA }}
 
       - name: Set up Cloud SDK
-        if: steps.check_creds.outputs.has_creds == 'true'
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Deploy dojo-zen to Cloud Run
-        if: steps.check_creds.outputs.has_creds == 'true'
         run: |
           gcloud run deploy "$SERVICE_NAME" \
             --source . \
@@ -94,7 +91,6 @@ jobs:
             --quiet
 
       - name: Sync Cloud Scheduler Jobs (Weekday 7AM ET + Sunday 6PM ET)
-        if: steps.check_creds.outputs.has_creds == 'true'
         env:
           # Must match CRON_SECRET on the dojo-zen service. Sent as a header, never in the URL.
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
@@ -176,6 +172,5 @@ jobs:
           fi
 
       - name: Verify live production health
-        if: steps.check_creds.outputs.has_creds == 'true'
         run: |
           curl -fsSL https://dojo.herrington.ai/api/status | python3 -m json.tool
