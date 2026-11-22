@@ -23,3 +23,8 @@ def test_deploy_stays_keyless_and_gated():
     assert "workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}" in src
     assert not re.search(r"credentials_json|GCP_SA_KEY", src)
     assert "environment: production" in src and "needs: test" in src
+
+
+def test_deploy_never_touches_scheduler_or_the_cron_secret():
+    src = WORKFLOW.read_text()
+    assert "gcloud scheduler" not in src and "secrets.CRON_SECRET" not in src
