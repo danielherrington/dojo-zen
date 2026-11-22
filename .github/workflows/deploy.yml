@@ -39,7 +39,7 @@ jobs:
         run: uv run pytest -v
 
   deploy:
-    name: Deploy to Cloud Run & Cloud Scheduler
+    name: Deploy to Cloud Run
     needs: test  # tests must pass first
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -90,86 +90,8 @@ jobs:
             --max-instances 2 \
             --quiet
 
-      - name: Sync Cloud Scheduler Jobs (Weekday 7AM ET + Sunday 6PM ET)
-        env:
-          # Must match CRON_SECRET on the dojo-zen service. Sent as a header, never in the URL.
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-        run: |
-          if [ -z "$CRON_SECRET" ]; then
-            echo "::warning::CRON_SECRET GitHub secret is not set; leaving Cloud Scheduler jobs unchanged."
-            exit 0
-          fi
-          SERVICE_URL=$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --project "$PROJECT_ID" --format 'value(status.url)')
-          echo "Cloud Run Service URL: $SERVICE_URL"
-
-          # 1. Urgent Alerts (every 10 minutes)
-          if gcloud scheduler jobs describe dojo-check-alerts --location "$REGION" --project "$PROJECT_ID" &>/dev/null; then
-            gcloud scheduler jobs update http dojo-check-alerts \
-              --location "$REGION" \
-              --project "$PROJECT_ID" \
-              --schedule "*/10 * * * *" \
-              --time-zone "America/New_York" \
-              --uri "$SERVICE_URL/api/cron/check-alerts" \
-              --update-headers "Authorization=Bearer $CRON_SECRET" \
-              --http-method POST \
-              --quiet
-          else
-            gcloud scheduler jobs create http dojo-check-alerts \
-              --location "$REGION" \
-              --project "$PROJECT_ID" \
-              --schedule "*/10 * * * *" \
-              --time-zone "America/New_York" \
-              --uri "$SERVICE_URL/api/cron/check-alerts" \
-              --headers "Authorization=Bearer $CRON_SECRET" \
-              --http-method POST \
-              --quiet
-          fi
-
-          # 2. Weekday Morning Digest (Mon-Fri 7:00 AM ET)
-          if gcloud scheduler jobs describe dojo-daily-digest --location "$REGION" --project "$PROJECT_ID" &>/dev/null; then
-            gcloud scheduler jobs update http dojo-daily-digest \
-              --location "$REGION" \
-              --project "$PROJECT_ID" \
-              --schedule "0 7 * * 1-5" \
-              --time-zone "America/New_York" \
-              --uri "$SERVICE_URL/api/cron/daily-digest" \
-              --update-headers "Authorization=Bearer $CRON_SECRET" \
-              --http-method POST \
-              --quiet
-          else
-            gcloud scheduler jobs create http dojo-daily-digest \
-              --location "$REGION" \
-              --project "$PROJECT_ID" \
-              --schedule "0 7 * * 1-5" \
-              --time-zone "America/New_York" \
-              --uri "$SERVICE_URL/api/cron/daily-digest" \
-              --headers "Authorization=Bearer $CRON_SECRET" \
-              --http-method POST \
-              --quiet
-          fi
-
-          # 3. Sunday Evening Week-Ahead Digest (Sun 6:00 PM ET)
-          if gcloud scheduler jobs describe dojo-sunday-digest --location "$REGION" --project "$PROJECT_ID" &>/dev/null; then
-            gcloud scheduler jobs update http dojo-sunday-digest \
-              --location "$REGION" \
-              --project "$PROJECT_ID" \
-              --schedule "0 18 * * 0" \
-              --time-zone "America/New_York" \
-              --uri "$SERVICE_URL/api/cron/daily-digest" \
-              --update-headers "Authorization=Bearer $CRON_SECRET" \
-              --http-method POST \
-              --quiet
-          else
-            gcloud scheduler jobs create http dojo-sunday-digest \
-              --location "$REGION" \
-              --project "$PROJECT_ID" \
-              --schedule "0 18 * * 0" \
-              --time-zone "America/New_York" \
-              --uri "$SERVICE_URL/api/cron/daily-digest" \
-              --headers "Authorization=Bearer $CRON_SECRET" \
-              --http-method POST \
-              --quiet
-          fi
+      # Cloud Scheduler jobs are managed by hand, not here (DAN-478): the deploy account has no
+      # scheduler access and never sees CRON_SECRET. See HANDOFF.md for the job definitions.
 
       - name: Verify live production health
         run: |
