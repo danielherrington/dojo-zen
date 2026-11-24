@@ -162,6 +162,7 @@ ERROR_PREFIX = "error__"    # error__<feature>__<code>
 ZERO_PREFIX = "zero__"      # zero__<feature>: calls that found nothing
 ZQ_PREFIX = "zq__"          # zq__<token>: normalised tokens from zero-result queries (shown only at count >= 3)
 DUR_PREFIX = "dur__"        # dur__<feature>__<bucket upper bound ms | inf>
+DENIED_PREFIX = "denied__"  # denied__<channel>: requests refused with 401/403 (DAN-526)
 DURATION_BUCKETS = (50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000)
 ZERO_QUERY_MIN_COUNT = 3
 
