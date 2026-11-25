@@ -192,3 +192,13 @@ def test_cron_fails_closed_without_secret(client, monkeypatch, cloud_run):
 def test_cron_old_default_secret_no_longer_works(client, monkeypatch):
     monkeypatch.setattr(settings, "cron_secret", "real-secret")
     assert client.post("/api/cron/check-alerts?secret=dojo-zen-cron-token").status_code == 401
+
+
+def test_privacy_page_is_public_static_and_linked_from_login(locked, client):
+    res = client.get("/privacy")
+    assert res.status_code == 200 and res.headers["content-type"].startswith("text/html")
+    assert "gmail.readonly" in res.text and "Limited Use" in res.text
+    assert "@" not in res.text and "<script" not in res.text  # no addresses, nothing to run
+    assert "frame-ancestors 'none'" in res.headers["content-security-policy"]
+    assert 'href="/privacy"' in client.get("/login").text
+    assert client.get("/", follow_redirects=False).status_code == 303  # the portal itself stays gated

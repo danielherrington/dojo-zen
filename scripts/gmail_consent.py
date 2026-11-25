@@ -7,9 +7,9 @@ printing them: dojo-zen-gmail-client-id, dojo-zen-gmail-client-secret, dojo-zen-
 It also grants the Cloud Run runtime account secretAccessor on each. Nothing else changes; wiring
 the secrets into the service is part of the next deploy.
 
-Needs an OAuth client of type "Desktop app" (Google Cloud console > APIs & Services > Credentials)
-in a project with the Gmail API enabled, with its consent screen published "In production" so the
-refresh token doesn't expire after 7 days.
+Needs an OAuth client of type "Desktop app" from the `dojo-zen-herrington` project (DAN-550), which
+exists only for this sign-in: its consent screen is published "In production" so the refresh token
+doesn't expire after 7 days. The secrets still live in `herrington-ai-site`, where the service runs.
 
 Usage:
     uv run python scripts/gmail_consent.py path/to/client_secret.json
