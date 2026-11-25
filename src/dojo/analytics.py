@@ -28,6 +28,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from dojo.tz import family_now, family_tz, to_family_tz
 from dojo.usage_v1 import (
+    DENIED_PREFIX,
     DUR_PREFIX,
     DURATION_BUCKETS,
     ERROR_PREFIX,
@@ -232,6 +233,11 @@ class UsageMiddleware:
                 if self.recorder is not None:
                     self._record(family_now().date().isoformat(), channel)
                 _emit_feature_used(scope, channel)
+            elif status["code"] in (401, 403):
+                # A locked-out client (e.g. after a code rotation) must be visible (DAN-526).
+                if self.recorder is not None:
+                    self._record(family_now().date().isoformat(), f"{DENIED_PREFIX}{channel}")
+                _emit_refused(scope, channel, status["code"])
 
     def _record(self, day: str, channel: str) -> None:
         def _do() -> None:
@@ -256,6 +262,15 @@ def _emit_feature_used(scope: Scope, channel: str) -> None:
     headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
     token = _bearer(headers.get("authorization")) or _cookie(headers.get("cookie"), SESSION_COOKIE)
     emit("feature_used", v1_channel(channel, headers.get("user-agent")), feature=channel, actor=actor_hash(token))
+
+
+def _emit_refused(scope: Scope, channel: str, code: int) -> None:
+    """v1 error event for a refused request: client family only, never the presented token."""
+    from dojo.usage_v1 import emit, v1_channel
+
+    headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+    emit("error", v1_channel(channel, headers.get("user-agent")), feature=channel,
+         props={"code": "auth_refused", "status": code})
 
 
 # --- Summary ---
@@ -356,6 +371,8 @@ def summarize(
     zeros: Counter = Counter()
     zero_tokens: Counter = Counter()
     durations: Dict[str, Counter] = defaultdict(Counter)
+    refused: Counter = Counter()
+    refused_daily: Dict[str, Counter] = defaultdict(Counter)
     prefixed = ((TOOL_PREFIX, calls), (ERROR_PREFIX, errors), (ZERO_PREFIX, zeros), (ZQ_PREFIX, zero_tokens))
     for row in usage:
         day = row.get("day")
@@ -369,6 +386,11 @@ def summarize(
                 continue
             if channel.startswith(GUARD_PREFIX):
                 guard_counts[channel[len(GUARD_PREFIX):]] += int(count)
+                continue
+            if channel.startswith(DENIED_PREFIX):
+                ch = channel[len(DENIED_PREFIX):]
+                refused[ch] += int(count)
+                refused_daily[day][ch] += int(count)
                 continue
             if channel.startswith(DUR_PREFIX):
                 feature, _, bucket = channel[len(DUR_PREFIX):].rpartition("__")
@@ -408,6 +430,15 @@ def summarize(
             "zero_results": {f: {"count": n, "rate": _rate(n, calls.get(f, 0))} for f, n in zeros.most_common()},
             "zero_result_terms": {t: n for t, n in zero_tokens.most_common() if n >= ZERO_QUERY_MIN_COUNT},
             "duration_ms": {f: _percentiles(b) for f, b in sorted(durations.items())},
+        },
+        "refused": {
+            "totals": dict(refused.most_common()),
+            # Days where a channel was refused more often than it succeeded: likely a locked-out client.
+            "lockout_days": [
+                {"day": d, "channel": ch, "refused": n, "ok": daily.get(d, {}).get(ch, 0)}
+                for d in sorted(refused_daily) for ch, n in sorted(refused_daily[d].items())
+                if n > daily.get(d, {}).get(ch, 0)
+            ],
         },
         "usage": {
             "totals": dict(totals),
@@ -527,6 +558,13 @@ def format_report(r: Dict[str, Any]) -> str:
               for k, v in f.get("zero_results", {}).items()] or ["  (none)"]
     lines.append(f"Zero-result terms (count >= {ZERO_QUERY_MIN_COUNT})")
     lines += [f"  {k.ljust(24)}{str(v).rjust(6)}" for k, v in f.get("zero_result_terms", {}).items()] or ["  (none)"]
+    lines.append("")
+
+    rf = r.get("refused", {})
+    lines.append("Refused requests (401/403) by channel")
+    lines += [f"  {k.ljust(24)}{str(v).rjust(6)}" for k, v in rf.get("totals", {}).items()] or ["  (none)"]
+    for lo in rf.get("lockout_days", []):
+        lines.append(f"  ! {lo['day']} {lo['channel']}: {lo['refused']} refused vs {lo['ok']} ok (a client may be locked out)")
     lines.append("")
 
     t = r["triage"]

@@ -262,8 +262,8 @@ def test_usage_middleware_counts_successful_requests_only():
     client = TestClient(_usage_app(recorded))
     client.get("/")
     client.get("/api/feed")
-    client.post("/api/ask")  # 401: not counted
-    assert [ch for _, ch in recorded] == ["portal_view", "api"]
+    client.post("/api/ask")  # 401: counted as a refusal, not as use (DAN-526)
+    assert [ch for _, ch in recorded] == ["portal_view", "api", "denied__ask"]
 
 
 def test_usage_middleware_disabled():
@@ -347,3 +347,34 @@ def test_firestore_parity(db):
     _seed(fdb)
     assert _summary(fdb) == _summary(db)
     assert fdb.usage_col.document("2026-11-15").get().to_dict()["mcp"] == 2
+
+
+# --- DAN-526: refused requests are counted, never the token ---
+
+def test_usage_middleware_counts_refusals_without_the_token(monkeypatch):
+    import io, json
+    from dojo import usage_v1
+
+    buf = io.StringIO()
+    real = usage_v1.emit
+    monkeypatch.setattr(usage_v1, "emit", lambda *a, **k: real(*a, **{**k, "stream": buf}))
+    recorded = []
+    client = TestClient(_usage_app(recorded))
+    client.post("/api/ask", headers={"Authorization": "Bearer old-code-123", "User-Agent": "Cursor/1.0.0"})
+    client.get("/")
+    assert [ch for _, ch in recorded] == ["denied__ask", "portal_view"]
+    events = [json.loads(line) for line in buf.getvalue().splitlines()]
+    refused = [e for e in events if e["event"] == "error"]
+    assert refused and refused[0]["props"] == {"code": "auth_refused", "status": 401}
+    assert "old-code-123" not in buf.getvalue() and "actor" not in refused[0]
+
+
+def test_report_flags_a_locked_out_channel():
+    usage = [{"day": "2026-11-20", "mcp": 80, "denied__mcp": 5},
+             {"day": "2026-11-21", "mcp": 3, "denied__mcp": 97}]
+    r = summarize([], [], usage, days=7, now=datetime(2026, 11, 22, tzinfo=timezone.utc))
+    assert r["refused"]["totals"] == {"mcp": 102}
+    assert r["refused"]["lockout_days"] == [{"day": "2026-11-21", "channel": "mcp", "refused": 97, "ok": 3}]
+    assert r["usage"]["totals"] == {"mcp": 83}
+    from dojo.analytics import format_report
+    assert "locked out" in format_report({**r, "gaps": []})
