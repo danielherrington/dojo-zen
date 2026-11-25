@@ -422,17 +422,15 @@ def school_closures(
 ) -> Dict[str, Dict[str, str]]:
     """{source: {"type", "title"}} for each school source closed or dismissing early on ``day``.
 
-    Sources: ClassDojo calendar events (``dojo``), school-email items (other sources) and the
-    optional FAMILY_SCHOOL_CALENDARS feeds. A day off outranks an early dismissal. Any source that
-    can't be read is skipped, never failing the pickup answer.
+    Sources: ClassDojo calendar events (``dojo``), stored school items for any source (school
+    emails, or dates the parent confirmed) and the optional FAMILY_SCHOOL_CALENDARS feeds. A day off outranks an early
+    dismissal. Any source that can't be read is skipped, never failing the pickup answer.
     """
     found: Dict[str, List[Dict[str, str]]] = {s: [] for s in sources}
     if "dojo" in found:
         found["dojo"] += [e for e in _dojo_events_between(db, day, day) if e["type"] in CLOSURE_TYPES]
     if hasattr(db, "get_school_items"):
         for src in found:
-            if src == "dojo":
-                continue
             try:
                 rows = db.get_school_items(src, day.isoformat(), day.isoformat())
             except Exception as e:
