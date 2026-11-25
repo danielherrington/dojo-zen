@@ -379,6 +379,14 @@ def test_dojo_event_and_email_item_mark_no_school(no_overrides, monkeypatch):
     assert {c["source"] for c in out["school_closures"]} == {"dojo", "academy"}
 
 
+def test_stored_closure_marks_a_dojo_school_too(no_overrides, monkeypatch):
+    # DAN-479: a confirmed closure counts even when ClassDojo posts no calendar event for it.
+    db = _ClosureDB(items=[{"source": "dojo", "date": "2026-11-25", "type": "day_off", "title": "No school"}])
+    by_kid = {a["children"][0]: a for a in _owner("2026-11-25", db, monkeypatch)["assignments"]}
+    assert by_kid["Kid"]["status"] == "no_school" and by_kid["Kid"]["school_note"] == "No school"
+    assert "status" not in by_kid["Bea"]
+
+
 def test_unreadable_school_feed_never_fails_the_answer(no_overrides, monkeypatch):
     monkeypatch.setenv("FAMILY_SCHOOL_CALENDARS", json.dumps({"academy": "https://cal.test/missing.ics"}))
     out = logistics.pickup_owner("2026-11-25", calendars={}, setup=SETUP_TWO, db=_ClosureDB(),
