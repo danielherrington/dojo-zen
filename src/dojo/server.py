@@ -170,6 +170,7 @@ LOGIN_PAGE = """<!doctype html>
   <input type="password" name="token" autocomplete="current-password" placeholder="Access code" required autofocus>
   <input type="hidden" name="next" value="{next}">
   <button type="submit">Sign in</button>
+  <p style="margin:16px 0 0"><a href="/privacy">Privacy</a></p>
 </form></body></html>"""
 
 
@@ -213,6 +214,12 @@ async def serve_index():
     if not index_file.exists():
         raise HTTPException(status_code=404, detail="Web application UI not found")
     return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
+
+
+@app.get("/privacy", response_class=HTMLResponse, include_in_schema=False)
+async def privacy_page():
+    """Public privacy notice, linked from Google's consent screen (DAN-550). Static: no family data."""
+    return HTMLResponse((WEB_DIR / "privacy.html").read_text(encoding="utf-8"))
 
 
 @app.post("/api/ask", response_model=QAResult)
