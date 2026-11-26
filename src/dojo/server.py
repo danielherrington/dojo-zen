@@ -447,10 +447,23 @@ async def sync_now():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# DAN-600: get_stats() reads every stored document (~365 Firestore reads). An uptime monitor polls
+# this route about every 100 s, so the stats are reused for a few minutes instead of re-read each time.
+STATUS_CACHE_SECONDS = 300
+_status_cache: Dict[str, Any] = {"at": None, "stats": None}
+
+
+def _cached_stats() -> Dict[str, Any]:
+    now = time.monotonic()
+    if _status_cache["at"] is None or now - _status_cache["at"] >= STATUS_CACHE_SECONDS:
+        _status_cache.update(at=now, stats=db.get_stats())
+    return _status_cache["stats"]
+
+
 @app.get("/api/status")
 async def get_status():
-    """Health and database statistics."""
-    stats = db.get_stats()
+    """Health and database statistics (stats may be up to STATUS_CACHE_SECONDS old)."""
+    stats = _cached_stats()
     return {
         "status": "online",
         "stats": stats,
