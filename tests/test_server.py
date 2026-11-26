@@ -114,3 +114,21 @@ def test_cron_check_alerts_reports_failed_sends(client, monkeypatch):
     body = res.json()
     assert body["urgent_alerts_sent"] == 1
     assert body["urgent_alerts_failed"] == 1
+
+
+def test_api_status_reuses_stats_for_a_few_minutes(client, monkeypatch):
+    """DAN-600: an uptime monitor polling /api/status must not re-read every document each time."""
+    from dojo import server
+
+    calls = []
+    monkeypatch.setattr(server.db, "get_stats", lambda: calls.append(1) or {"feed_total": len(calls)})
+    monkeypatch.setattr(server, "_status_cache", {"at": None, "stats": None})
+    clock = [1000.0]
+    monkeypatch.setattr(server.time, "monotonic", lambda: clock[0])
+
+    assert client.get("/api/status").json()["stats"] == {"feed_total": 1}
+    clock[0] += server.STATUS_CACHE_SECONDS - 1
+    assert client.get("/api/status").json()["stats"] == {"feed_total": 1}
+    clock[0] += 1
+    assert client.get("/api/status").json()["stats"] == {"feed_total": 2}
+    assert len(calls) == 2
